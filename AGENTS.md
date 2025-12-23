@@ -9,7 +9,7 @@ This repository is a collection of Python scripts for camera capture and process
 
 ## Build, Test, and Development Commands
 There is no build system; run scripts directly with Python.
-- `python save_davis_tcp.py` — captures events and frames from DV Viewer (TCP ports `7777/7778`) into `davis_output/<timestamp>/`, including `output.aedat4`.
+- `python save_davis_tcp.py` — captures events and frames into `davis_output/<timestamp>/`, including `output.aedat4`. Set `INPUT_MODE = "camera"` for direct hardware or `"network"` for DV Viewer TCP.
 - Dependencies are installed per your environment (e.g., `pip install dv-processing`, plus `opencv-python` and `numpy`).
 
 ## Coding Style & Naming Conventions

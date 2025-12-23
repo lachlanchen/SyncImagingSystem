@@ -16,6 +16,8 @@ import numpy as np
 HOST = "127.0.0.1"
 EVENTS_PORT = 7777
 FRAMES_PORT = 7778
+INPUT_MODE = "camera"  # "camera" for direct hardware, "network" for DV Viewer TCP
+CAMERA_SERIAL = None  # set to a serial string to pick a specific device
 
 OUT_DIR = Path("davis_output")
 
@@ -49,10 +51,22 @@ def save_events_npz(events_np: np.ndarray, path: Path) -> None:
 
 
 def build_inputs():
-    if DV_MODULE == "dv_processing" and hasattr(dv, "io") and hasattr(dv.io, "NetworkReader"):
-        event_input = _create_network_input(dv.io.NetworkReader, HOST, EVENTS_PORT)
-        frame_input = _create_network_input(dv.io.NetworkReader, HOST, FRAMES_PORT)
-        return "dv_processing", event_input, frame_input
+    if DV_MODULE == "dv_processing" and INPUT_MODE == "camera":
+        if not hasattr(dv.io, "camera"):
+            raise RuntimeError("dv_processing camera module is unavailable")
+        if CAMERA_SERIAL:
+            camera = dv.io.camera.open(CAMERA_SERIAL)
+        else:
+            camera = dv.io.camera.open()
+        return "dv_processing_camera", camera, camera
+    if DV_MODULE == "dv_processing" and INPUT_MODE == "network":
+        if hasattr(dv, "io") and hasattr(dv.io, "NetworkReader"):
+            event_input = _create_network_input(dv.io.NetworkReader, HOST, EVENTS_PORT)
+            frame_input = _create_network_input(dv.io.NetworkReader, HOST, FRAMES_PORT)
+            return "dv_processing_network", event_input, frame_input
+        raise RuntimeError("dv_processing NetworkReader is unavailable")
+    if INPUT_MODE == "camera":
+        raise RuntimeError("Direct camera input requires dv-processing")
     try:
         from dv.NetworkInput import NetworkInput
 
@@ -68,7 +82,7 @@ def build_inputs():
 
 
 def read_events(backend: str, event_input):
-    if backend == "dv_processing":
+    if backend in ("dv_processing_network",):
         events = event_input.getNextEventBatch()
         if events is None or events.isEmpty():
             return None, None
@@ -83,7 +97,7 @@ def read_events(backend: str, event_input):
 
 
 def read_frame(backend: str, frame_input):
-    if backend == "dv_processing":
+    if backend in ("dv_processing_network",):
         return frame_input.getNextFrame()
     try:
         return next(frame_input)
@@ -115,7 +129,7 @@ def _safe_call(obj, method_name):
 def build_aedat_writer(backend: str, event_input, frame_input, run_dir: Path):
     if not SAVE_AEDAT4:
         return None
-    if backend != "dv_processing":
+    if backend not in ("dv_processing_network", "dv_processing_camera"):
         print("SAVE_AEDAT4 requires dv-processing; disabling AEDAT4 output.")
         return None
     if not hasattr(dv.io, "MonoCameraWriter"):
@@ -150,7 +164,10 @@ def main() -> None:
     events_file = run_dir / "events.npz"
     frames_file = run_dir / "frames.avi"
 
-    print(f"Connecting to DV TCP servers at {HOST}:{EVENTS_PORT} and {HOST}:{FRAMES_PORT}")
+    if INPUT_MODE == "network":
+        print(f"Connecting to DV TCP servers at {HOST}:{EVENTS_PORT} and {HOST}:{FRAMES_PORT}")
+    else:
+        print("Opening camera directly via dv-processing")
     backend, event_input, frame_input = build_inputs()
     print(f"Using dv backend: {backend} ({DV_MODULE})")
     print(f"Output directory: {run_dir}")
@@ -167,46 +184,90 @@ def main() -> None:
         while True:
             got_data = False
 
-            events_np, events_obj = read_events(backend, event_input)
-            if events_np is not None:
-                got_data = True
-                if aedat_writer and events_obj is not None:
-                    aedat_writer.writeEvents(events_obj)
-                if SAVE_EVENTS_NPZ:
-                    event_chunks.append(events_np)
+            if backend == "dv_processing_camera":
+                packet = event_input.readNext()
+                if isinstance(packet, dv.EventStore):
+                    events_np = packet.numpy()
+                    got_data = True
+                    if aedat_writer:
+                        aedat_writer.writeEvents(packet)
+                    if SAVE_EVENTS_NPZ:
+                        event_chunks.append(events_np)
+                elif isinstance(packet, dv.Frame):
+                    frame = packet
+                    got_data = True
+                    if aedat_writer:
+                        aedat_writer.writeFrame(frame)
+                    if SAVE_FRAMES_VIDEO:
+                        img = _get_frame_image(frame)
+                        ts = _get_frame_timestamp(frame)
+                        if img.ndim == 3 and img.shape[2] == 4:
+                            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                        if img.ndim == 3 and img.shape[2] == 1:
+                            img = img[:, :, 0]
+                        if video_writer is None:
+                            height, width = img.shape[:2]
+                            video_is_color = img.ndim == 3
+                            fourcc = cv2.VideoWriter_fourcc(*VIDEO_FOURCC)
+                            video_writer = cv2.VideoWriter(
+                                str(frames_file),
+                                fourcc,
+                                VIDEO_FPS,
+                                (width, height),
+                                isColor=video_is_color,
+                            )
+                            if not video_writer.isOpened():
+                                raise RuntimeError(f"Failed to open video writer for {frames_file}")
+                        if video_is_color and img.ndim == 2:
+                            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                        if not video_is_color and img.ndim == 3:
+                            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        video_writer.write(img)
+                        print(f"[FRAME] wrote frame {frame_index:06d} ts={ts}")
+                        frame_index += 1
+                else:
+                    got_data = False
+            else:
+                events_np, events_obj = read_events(backend, event_input)
+                if events_np is not None:
+                    got_data = True
+                    if aedat_writer and events_obj is not None:
+                        aedat_writer.writeEvents(events_obj)
+                    if SAVE_EVENTS_NPZ:
+                        event_chunks.append(events_np)
 
-            frame = read_frame(backend, frame_input)
-            if frame is not None:
-                got_data = True
-                if aedat_writer:
-                    aedat_writer.writeFrame(frame)
-                if SAVE_FRAMES_VIDEO:
-                    img = _get_frame_image(frame)
-                    ts = _get_frame_timestamp(frame)
-                    if img.ndim == 3 and img.shape[2] == 4:
-                        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-                    if img.ndim == 3 and img.shape[2] == 1:
-                        img = img[:, :, 0]
-                    if video_writer is None:
-                        height, width = img.shape[:2]
-                        video_is_color = img.ndim == 3
-                        fourcc = cv2.VideoWriter_fourcc(*VIDEO_FOURCC)
-                        video_writer = cv2.VideoWriter(
-                            str(frames_file),
-                            fourcc,
-                            VIDEO_FPS,
-                            (width, height),
-                            isColor=video_is_color,
-                        )
-                        if not video_writer.isOpened():
-                            raise RuntimeError(f"Failed to open video writer for {frames_file}")
-                    if video_is_color and img.ndim == 2:
-                        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-                    if not video_is_color and img.ndim == 3:
-                        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    video_writer.write(img)
-                    print(f"[FRAME] wrote frame {frame_index:06d} ts={ts}")
-                    frame_index += 1
+                frame = read_frame(backend, frame_input)
+                if frame is not None:
+                    got_data = True
+                    if aedat_writer:
+                        aedat_writer.writeFrame(frame)
+                    if SAVE_FRAMES_VIDEO:
+                        img = _get_frame_image(frame)
+                        ts = _get_frame_timestamp(frame)
+                        if img.ndim == 3 and img.shape[2] == 4:
+                            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                        if img.ndim == 3 and img.shape[2] == 1:
+                            img = img[:, :, 0]
+                        if video_writer is None:
+                            height, width = img.shape[:2]
+                            video_is_color = img.ndim == 3
+                            fourcc = cv2.VideoWriter_fourcc(*VIDEO_FOURCC)
+                            video_writer = cv2.VideoWriter(
+                                str(frames_file),
+                                fourcc,
+                                VIDEO_FPS,
+                                (width, height),
+                                isColor=video_is_color,
+                            )
+                            if not video_writer.isOpened():
+                                raise RuntimeError(f"Failed to open video writer for {frames_file}")
+                        if video_is_color and img.ndim == 2:
+                            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                        if not video_is_color and img.ndim == 3:
+                            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        video_writer.write(img)
+                        print(f"[FRAME] wrote frame {frame_index:06d} ts={ts}")
+                        frame_index += 1
 
             if CAPTURE_SECONDS is not None:
                 if (time.monotonic() - start_time) >= CAPTURE_SECONDS:
