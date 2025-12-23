@@ -23,7 +23,7 @@ There is no build system; run scripts directly with Python.
 
 ## Commit & Pull Request Guidelines
 - Git history is minimal (initial commit only), so no strict convention exists. Use short, imperative messages (e.g., “Add DAVIS capture script”).
-- After changes, run `git status`, then `git add -A`, `git commit -m "Describe change"`, and `git push`.
+- Always commit and push after changes unless explicitly told not to. Use `git status`, `git add -A`, `git commit -m "Describe change"`, then `git push`.
 - PRs should describe the hardware/software setup, ports, and any required viewer settings; include sample outputs when applicable.
 
 ## Configuration & Data Hygiene

@@ -4,7 +4,12 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
-import dv
+try:
+    import dv_processing as dv
+    DV_MODULE = "dv_processing"
+except ImportError:
+    import dv
+    DV_MODULE = "dv"
 import numpy as np
 
 
@@ -23,6 +28,16 @@ VIDEO_FPS = 30.0
 VIDEO_FOURCC = "MJPG"
 
 
+def _create_network_input(cls, host: str, port: int):
+    try:
+        return cls(host=host, port=port)
+    except TypeError:
+        try:
+            return cls(address=host, port=port)
+        except TypeError:
+            return cls(host, port)
+
+
 def save_events_npz(events_np: np.ndarray, path: Path) -> None:
     np.savez_compressed(
         path,
@@ -35,8 +50,8 @@ def save_events_npz(events_np: np.ndarray, path: Path) -> None:
 
 def build_inputs():
     if hasattr(dv, "io"):
-        event_input = dv.io.NetworkEventInput(host=HOST, port=EVENTS_PORT)
-        frame_input = dv.io.NetworkFrameInput(host=HOST, port=FRAMES_PORT)
+        event_input = _create_network_input(dv.io.NetworkEventInput, HOST, EVENTS_PORT)
+        frame_input = _create_network_input(dv.io.NetworkFrameInput, HOST, FRAMES_PORT)
         return "dv_processing", event_input, frame_input
     try:
         from dv.NetworkInput import NetworkInput
@@ -85,7 +100,7 @@ def main() -> None:
 
     print(f"Connecting to DV TCP servers at {HOST}:{EVENTS_PORT} and {HOST}:{FRAMES_PORT}")
     backend, event_input, frame_input = build_inputs()
-    print(f"Using dv backend: {backend}")
+    print(f"Using dv backend: {backend} ({DV_MODULE})")
     print(f"Output directory: {run_dir}")
 
     aedat_writer = None
