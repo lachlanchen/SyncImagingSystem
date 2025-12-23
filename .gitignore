@@ -12,7 +12,7 @@ venv/
 # Recorded data / outputs
 davis_output/
 data/
-data-old/
+data/
 recordings/
 *.aedat4
 *.npz
