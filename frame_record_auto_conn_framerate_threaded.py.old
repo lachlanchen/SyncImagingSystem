@@ -1,0 +1,660 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import os
+import sys
+import time
+import threading
+import queue
+import cv2
+import numpy as np
+from ctypes import *
+from datetime import datetime
+
+# Make sure your Python/MvImport folder is on the path:
+BASE = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(BASE, "haikang_sdk", "Python"))
+sys.path.append(os.path.join(BASE, "haikang_sdk", "Python", "MvImport"))
+
+from MvCameraControl_class import (
+    MvCamera,
+    MV_CC_DEVICE_INFO_LIST,
+    MV_CC_DEVICE_INFO,
+    MV_GIGE_DEVICE,
+    MV_USB_DEVICE,
+    MV_GENTL_CAMERALINK_DEVICE,
+    MV_GENTL_CXP_DEVICE,
+    MV_GENTL_XOF_DEVICE,
+    MV_FRAME_OUT,
+    MV_CC_RECORD_PARAM,
+    MV_CC_INPUT_FRAME_INFO,
+    MVCC_INTVALUE,
+    MVCC_ENUMVALUE,
+    MVCC_FLOATVALUE,
+    MvGvspPixelType,
+    MV_CC_PIXEL_CONVERT_PARAM
+)
+from CameraParams_const import MV_ACCESS_Exclusive
+from CameraParams_header import MV_TRIGGER_MODE_OFF, MV_FormatType_AVI
+from PixelType_header import (
+    PixelType_Gvsp_RGB8_Packed, 
+    PixelType_Gvsp_BGR8_Packed,
+    PixelType_Gvsp_Mono8,
+    PixelType_Gvsp_BayerGR8,
+    PixelType_Gvsp_BayerRG8,
+    PixelType_Gvsp_BayerGB8,
+    PixelType_Gvsp_BayerBG8
+)
+
+# Global flags and variables
+g_exit_flag = threading.Event()
+g_recording_flag = threading.Event()
+g_frame_queue = queue.Queue(maxsize=20)  # Increased queue size
+g_recording_filename = ""
+g_cam = None
+g_device_info = None
+g_frame_lock = threading.Lock()  # Add lock for thread safety
+
+def get_device_name(device_info):
+    """Extract device name from device info"""
+    try:
+        if device_info.nTLayerType == MV_GIGE_DEVICE:
+            raw = device_info.SpecialInfo.stGigEInfo.chModelName
+        elif device_info.nTLayerType == MV_USB_DEVICE:
+            raw = device_info.SpecialInfo.stUsb3VInfo.chModelName
+        elif device_info.nTLayerType == MV_GENTL_CAMERALINK_DEVICE:
+            raw = device_info.SpecialInfo.stCMLInfo.chModelName
+        elif device_info.nTLayerType == MV_GENTL_CXP_DEVICE:
+            raw = device_info.SpecialInfo.stCXPInfo.chModelName
+        elif device_info.nTLayerType == MV_GENTL_XOF_DEVICE:
+            raw = device_info.SpecialInfo.stXoFInfo.chModelName
+        else:
+            return "Unknown Device"
+        
+        return bytes(raw).split(b'\x00', 1)[0].decode(errors='ignore')
+    except:
+        return "Unknown Device"
+
+def wait_for_device():
+    """Wait for a device to be connected"""
+    dev_list = MV_CC_DEVICE_INFO_LIST()
+    layers = (
+        MV_GIGE_DEVICE
+        | MV_USB_DEVICE
+        | MV_GENTL_CAMERALINK_DEVICE
+        | MV_GENTL_CXP_DEVICE
+        | MV_GENTL_XOF_DEVICE
+    )
+    
+    print("Waiting for camera device...")
+    dot_count = 0
+    
+    while True:
+        ret = MvCamera.MV_CC_EnumDevices(layers, dev_list)
+        if ret == 0 and dev_list.nDeviceNum > 0:
+            # Device found
+            print("\n")  # New line after dots
+            return dev_list
+        
+        # Show waiting animation
+        print("\rWaiting for camera device" + "." * (dot_count % 4) + "   ", end="", flush=True)
+        dot_count += 1
+        time.sleep(0.5)
+
+def check_and_set_frame_rate(cam, desired_fps=None):
+    """Check if frame rate is adjustable and optionally set it"""
+    frame_rate_info = {}
+    
+    try:
+        # Check if AcquisitionFrameRateEnable exists
+        st_bool = c_bool(False)
+        ret = cam.MV_CC_GetBoolValue("AcquisitionFrameRateEnable", st_bool)
+        if ret == 0:
+            frame_rate_info['has_frame_rate_enable'] = True
+            frame_rate_info['frame_rate_enabled'] = st_bool.value
+            
+            # Enable frame rate control if not already enabled
+            if not st_bool.value:
+                ret = cam.MV_CC_SetBoolValue("AcquisitionFrameRateEnable", True)
+                if ret == 0:
+                    print("Enabled frame rate control")
+                    frame_rate_info['frame_rate_enabled'] = True
+                else:
+                    print(f"Warning: Could not enable frame rate control (0x{ret:08x})")
+        
+        # Get current frame rate settings
+        st_float_value = MVCC_FLOATVALUE()
+        memset(byref(st_float_value), 0, sizeof(MVCC_FLOATVALUE))
+        
+        # Try to get AcquisitionFrameRate (settable parameter)
+        ret = cam.MV_CC_GetFloatValue("AcquisitionFrameRate", st_float_value)
+        if ret == 0:
+            frame_rate_info['adjustable'] = True
+            frame_rate_info['current_set_fps'] = st_float_value.fCurValue
+            frame_rate_info['min_fps'] = st_float_value.fMin
+            frame_rate_info['max_fps'] = st_float_value.fMax
+            
+            print(f"\nFrame Rate Settings:")
+            print(f"  Current set FPS: {st_float_value.fCurValue:.2f}")
+            print(f"  Adjustable range: {st_float_value.fMin:.2f} - {st_float_value.fMax:.2f} fps")
+            
+            # Set desired frame rate if specified
+            if desired_fps is not None:
+                if st_float_value.fMin <= desired_fps <= st_float_value.fMax:
+                    ret = cam.MV_CC_SetFloatValue("AcquisitionFrameRate", desired_fps)
+                    if ret == 0:
+                        print(f"  Successfully set frame rate to {desired_fps} fps")
+                        frame_rate_info['current_set_fps'] = desired_fps
+                    else:
+                        print(f"  Error setting frame rate: 0x{ret:08x}")
+                else:
+                    print(f"  Cannot set {desired_fps} fps - out of range!")
+                    closest_fps = max(st_float_value.fMin, min(desired_fps, st_float_value.fMax))
+                    ret = cam.MV_CC_SetFloatValue("AcquisitionFrameRate", closest_fps)
+                    if ret == 0:
+                        frame_rate_info['current_set_fps'] = closest_fps
+        
+        # Get resulting frame rate
+        ret = cam.MV_CC_GetFloatValue("ResultingFrameRate", st_float_value)
+        if ret == 0:
+            frame_rate_info['resulting_fps'] = st_float_value.fCurValue
+            print(f"  Resulting FPS: {st_float_value.fCurValue:.2f}")
+    
+    except Exception as e:
+        print(f"Error checking frame rate: {e}")
+    
+    return frame_rate_info
+
+def frame_grabber_thread():
+    """Thread to continuously grab frames from camera"""
+    global g_cam, g_exit_flag, g_frame_queue
+    
+    print("Frame grabber thread started")
+    frame_out = MV_FRAME_OUT()
+    frame_count = 0
+    start_time = time.time()
+    
+    try:
+        while not g_exit_flag.is_set():
+            memset(byref(frame_out), 0, sizeof(frame_out))
+            ret = g_cam.MV_CC_GetImageBuffer(frame_out, 1000)
+            
+            if frame_out.pBufAddr and ret == 0:
+                frame_count += 1
+                
+                try:
+                    # Create frame info dictionary
+                    frame_info = {
+                        'width': frame_out.stFrameInfo.nWidth,
+                        'height': frame_out.stFrameInfo.nHeight,
+                        'pixel_type': frame_out.stFrameInfo.enPixelType,
+                        'frame_num': frame_out.stFrameInfo.nFrameNum,
+                        'timestamp': time.time(),
+                        'data_len': frame_out.stFrameInfo.nFrameLen
+                    }
+                    
+                    # Copy frame data as bytes - this is the key fix
+                    frame_bytes = bytes((c_ubyte * frame_out.stFrameInfo.nFrameLen).from_address(frame_out.pBufAddr))
+                    frame_info['data'] = frame_bytes
+                    
+                    # Try to put frame in queue (non-blocking)
+                    try:
+                        g_frame_queue.put_nowait(frame_info)
+                    except queue.Full:
+                        # Drop oldest frame and add new one
+                        try:
+                            g_frame_queue.get_nowait()
+                            g_frame_queue.put_nowait(frame_info)
+                        except queue.Empty:
+                            pass
+                    
+                    # Print FPS every 60 frames
+                    if frame_count % 60 == 0:
+                        elapsed = time.time() - start_time
+                        fps = frame_count / elapsed if elapsed > 0 else 0
+                        print(f"\rCamera FPS: {fps:.1f} | Queue size: {g_frame_queue.qsize()}", end="", flush=True)
+                
+                except Exception as e:
+                    print(f"\nError processing frame: {e}")
+                
+                finally:
+                    # Always free the buffer
+                    g_cam.MV_CC_FreeImageBuffer(frame_out)
+            
+            elif ret == 0x80000007:  # Timeout - this is normal
+                continue
+            else:
+                print(f"\nError getting frame: 0x{ret:08x}")
+                time.sleep(0.1)  # Brief pause on error
+    
+    except Exception as e:
+        print(f"\nFrame grabber thread error: {e}")
+    
+    print("\nFrame grabber thread stopped")
+
+def convert_frame_to_bgr(frame_info):
+    """Convert frame data to BGR format for OpenCV display"""
+    try:
+        width = frame_info['width']
+        height = frame_info['height']
+        pixel_type = frame_info['pixel_type']
+        frame_data = frame_info['data']
+        
+        # Convert bytes to numpy array
+        img_array = np.frombuffer(frame_data, dtype=np.uint8)
+        
+        if pixel_type == PixelType_Gvsp_BGR8_Packed:
+            # Already BGR
+            if len(img_array) == width * height * 3:
+                img_bgr = img_array.reshape((height, width, 3))
+            else:
+                return None
+                
+        elif pixel_type == PixelType_Gvsp_RGB8_Packed:
+            # RGB format - convert to BGR for OpenCV
+            if len(img_array) == width * height * 3:
+                img_rgb = img_array.reshape((height, width, 3))
+                img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+            else:
+                return None
+                
+        elif pixel_type == PixelType_Gvsp_Mono8:
+            # Mono format
+            if len(img_array) == width * height:
+                img_mono = img_array.reshape((height, width))
+                img_bgr = cv2.cvtColor(img_mono, cv2.COLOR_GRAY2BGR)
+            else:
+                return None
+                
+        elif pixel_type in [PixelType_Gvsp_BayerGR8, PixelType_Gvsp_BayerRG8, 
+                           PixelType_Gvsp_BayerGB8, PixelType_Gvsp_BayerBG8]:
+            # Bayer format - convert using OpenCV
+            if len(img_array) == width * height:
+                img_bayer = img_array.reshape((height, width))
+                if pixel_type == PixelType_Gvsp_BayerGR8:
+                    img_bgr = cv2.cvtColor(img_bayer, cv2.COLOR_BAYER_GR2BGR)
+                elif pixel_type == PixelType_Gvsp_BayerRG8:
+                    img_bgr = cv2.cvtColor(img_bayer, cv2.COLOR_BAYER_RG2BGR)
+                elif pixel_type == PixelType_Gvsp_BayerGB8:
+                    img_bgr = cv2.cvtColor(img_bayer, cv2.COLOR_BAYER_GB2BGR)
+                else:  # BayerBG8
+                    img_bgr = cv2.cvtColor(img_bayer, cv2.COLOR_BAYER_BG2BGR)
+            else:
+                return None
+        else:
+            # Unsupported format - create placeholder
+            print(f"\rUnsupported pixel format: {pixel_type}", end="", flush=True)
+            img_bgr = np.zeros((height, width, 3), dtype=np.uint8)
+            cv2.putText(img_bgr, f"Unsupported format: {pixel_type}", 
+                       (10, height//2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        return img_bgr
+        
+    except Exception as e:
+        print(f"\nError converting frame: {e}")
+        # Return blank image on error
+        try:
+            return np.zeros((frame_info['height'], frame_info['width'], 3), dtype=np.uint8)
+        except:
+            return np.zeros((480, 640, 3), dtype=np.uint8)
+
+def visualization_thread():
+    """Thread to visualize frames using OpenCV"""
+    global g_exit_flag, g_frame_queue, g_recording_flag
+    
+    print("Visualization thread started")
+    
+    try:
+        cv2.namedWindow("Camera View", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("Camera View", 800, 600)
+        
+        last_frame_time = time.time()
+        display_fps = 0
+        frame_count = 0
+        
+        while not g_exit_flag.is_set():
+            try:
+                # Get frame from queue with timeout
+                frame_info = g_frame_queue.get(timeout=0.1)
+                
+                # Convert to displayable format
+                img_bgr = convert_frame_to_bgr(frame_info)
+                
+                if img_bgr is not None:
+                    # Add status text
+                    status_text = f"FPS: {display_fps:.1f} | {frame_info['width']}x{frame_info['height']}"
+                    if g_recording_flag.is_set():
+                        status_text += " | RECORDING"
+                        cv2.putText(img_bgr, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    else:
+                        cv2.putText(img_bgr, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    
+                    # Display the frame
+                    cv2.imshow("Camera View", img_bgr)
+                    
+                    # Calculate display FPS
+                    frame_count += 1
+                    current_time = time.time()
+                    if current_time - last_frame_time >= 1.0:
+                        display_fps = frame_count / (current_time - last_frame_time)
+                        frame_count = 0
+                        last_frame_time = current_time
+                
+            except queue.Empty:
+                pass
+            except Exception as e:
+                print(f"\nVisualization error: {e}")
+                time.sleep(0.1)
+            
+            # Check for 'q' key to exit visualization
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                print("\nVisualization window closed")
+                g_exit_flag.set()
+                break
+    
+    except Exception as e:
+        print(f"\nVisualization thread error: {e}")
+    
+    finally:
+        cv2.destroyAllWindows()
+        print("Visualization thread stopped")
+
+def recording_thread():
+    """Thread to record frames to video file"""
+    global g_exit_flag, g_frame_queue, g_recording_flag, g_recording_filename, g_cam
+    
+    print("Recording thread started")
+    
+    try:
+        while not g_exit_flag.is_set():
+            # Wait for recording to start
+            if not g_recording_flag.wait(timeout=1.0):
+                continue
+            
+            if g_exit_flag.is_set():
+                break
+            
+            print(f"\nInitializing recording: {g_recording_filename}")
+            
+            try:
+                # Get recording parameters
+                record_param = MV_CC_RECORD_PARAM()
+                memset(byref(record_param), 0, sizeof(MV_CC_RECORD_PARAM))
+                
+                # Get camera parameters
+                st_param = MVCC_INTVALUE()
+                memset(byref(st_param), 0, sizeof(MVCC_INTVALUE))
+                g_cam.MV_CC_GetIntValue("Width", st_param)
+                record_param.nWidth = st_param.nCurValue
+                
+                g_cam.MV_CC_GetIntValue("Height", st_param)
+                record_param.nHeight = st_param.nCurValue
+                
+                st_enum_value = MVCC_ENUMVALUE()
+                memset(byref(st_enum_value), 0, sizeof(MVCC_ENUMVALUE))
+                g_cam.MV_CC_GetEnumValue("PixelFormat", st_enum_value)
+                record_param.enPixelType = MvGvspPixelType(st_enum_value.nCurValue)
+                
+                st_float_value = MVCC_FLOATVALUE()
+                memset(byref(st_float_value), 0, sizeof(MVCC_FLOATVALUE))
+                g_cam.MV_CC_GetFloatValue("ResultingFrameRate", st_float_value)
+                record_param.fFrameRate = st_float_value.fCurValue
+                
+                record_param.nBitRate = 5000
+                record_param.enRecordFmtType = MV_FormatType_AVI
+                record_param.strFilePath = g_recording_filename.encode('ascii')
+                
+                # Start recording
+                ret = g_cam.MV_CC_StartRecord(record_param)
+                if ret != 0:
+                    print(f"\nError starting recording: 0x{ret:08x}")
+                    g_recording_flag.clear()
+                    continue
+                
+                print(f"Recording started: {g_recording_filename}")
+                print(f"Resolution: {record_param.nWidth}×{record_param.nHeight} @ {record_param.fFrameRate:.1f} fps")
+                
+                frame_count = 0
+                start_time = time.time()
+                
+                # Recording loop
+                input_frame_info = MV_CC_INPUT_FRAME_INFO()
+                memset(byref(input_frame_info), 0, sizeof(MV_CC_INPUT_FRAME_INFO))
+                
+                while g_recording_flag.is_set() and not g_exit_flag.is_set():
+                    try:
+                        # Get frame from queue
+                        frame_info = g_frame_queue.get(timeout=0.1)
+                        
+                        # Convert frame data back to ctypes for recording
+                        frame_data_ctypes = (c_ubyte * len(frame_info['data']))(*frame_info['data'])
+                        
+                        # Input frame to recording
+                        input_frame_info.pData = cast(frame_data_ctypes, POINTER(c_ubyte))
+                        input_frame_info.nDataLen = frame_info['data_len']
+                        
+                        ret = g_cam.MV_CC_InputOneFrame(input_frame_info)
+                        if ret == 0:
+                            frame_count += 1
+                            
+                            # Print recording status every 60 frames
+                            if frame_count % 60 == 0:
+                                elapsed = time.time() - start_time
+                                fps = frame_count / elapsed if elapsed > 0 else 0
+                                print(f"\rRecording: {frame_count} frames | {elapsed:.1f}s | {fps:.1f} fps", 
+                                      end="", flush=True)
+                        else:
+                            print(f"\nError inputting frame for recording: 0x{ret:08x}")
+                        
+                    except queue.Empty:
+                        pass
+                    except Exception as e:
+                        print(f"\nRecording loop error: {e}")
+                
+                # Stop recording
+                g_cam.MV_CC_StopRecord()
+                elapsed = time.time() - start_time
+                print(f"\nRecording stopped: {frame_count} frames in {elapsed:.1f}s")
+                print(f"Video saved as: {g_recording_filename}")
+                
+            except Exception as e:
+                print(f"\nRecording setup error: {e}")
+                g_recording_flag.clear()
+    
+    except Exception as e:
+        print(f"\nRecording thread error: {e}")
+    
+    print("Recording thread stopped")
+
+def print_commands():
+    """Print available commands"""
+    print("\n" + "="*50)
+    print("AVAILABLE COMMANDS:")
+    print("="*50)
+    print("  r/record    - Start recording")
+    print("  s/stop      - Stop recording")
+    print("  f/fps <value> - Set frame rate (e.g., 'f 30')")
+    print("  h/help      - Show this help")
+    print("  q/quit      - Exit program")
+    print("="*50)
+
+def setup_camera(device_info):
+    """Setup camera with initial parameters"""
+    global g_cam, g_device_info
+    
+    g_device_info = device_info
+    
+    try:
+        # Create handle & open device
+        g_cam = MvCamera()
+        if g_cam.MV_CC_CreateHandle(device_info) != 0:
+            print("Failed to create device handle.")
+            return False
+        
+        if g_cam.MV_CC_OpenDevice(MV_ACCESS_Exclusive, 0) != 0:
+            print("Failed to open device.")
+            g_cam.MV_CC_DestroyHandle()
+            return False
+        
+        # For GigE, set optimal packet size
+        if device_info.nTLayerType == MV_GIGE_DEVICE:
+            pkt = g_cam.MV_CC_GetOptimalPacketSize()
+            if pkt > 0:
+                g_cam.MV_CC_SetIntValue("GevSCPSPacketSize", pkt)
+        
+        # Turn off trigger
+        g_cam.MV_CC_SetEnumValue("TriggerMode", MV_TRIGGER_MODE_OFF)
+        
+        # Check frame rate
+        check_and_set_frame_rate(g_cam)
+        
+        # Start grabbing
+        ret = g_cam.MV_CC_StartGrabbing()
+        if ret != 0:
+            print(f"Start grabbing failed: 0x{ret:08x}")
+            g_cam.MV_CC_CloseDevice()
+            g_cam.MV_CC_DestroyHandle()
+            return False
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error setting up camera: {e}")
+        return False
+
+def main():
+    global g_exit_flag, g_recording_flag, g_recording_filename, g_cam
+    
+    # Initialize SDK
+    MvCamera.MV_CC_Initialize()
+    
+    try:
+        # Wait for device
+        dev_list = wait_for_device()
+        
+        if dev_list.nDeviceNum == 1:
+            # Auto-connect to single device
+            print("Found 1 device, auto-connecting...")
+            device_info = cast(dev_list.pDeviceInfo[0], POINTER(MV_CC_DEVICE_INFO)).contents
+            device_name = get_device_name(device_info)
+            print(f"Connected to: {device_name}")
+        else:
+            # Multiple devices - let user choose
+            print(f"Found {dev_list.nDeviceNum} devices:")
+            for i in range(dev_list.nDeviceNum):
+                info = cast(dev_list.pDeviceInfo[i], POINTER(MV_CC_DEVICE_INFO)).contents
+                name = get_device_name(info)
+                print(f"  [{i}] {name}")
+            
+            idx = int(input(f"Select device [0-{dev_list.nDeviceNum-1}]: "))
+            device_info = cast(dev_list.pDeviceInfo[idx], POINTER(MV_CC_DEVICE_INFO)).contents
+            device_name = get_device_name(device_info)
+        
+        # Setup camera
+        if not setup_camera(device_info):
+            return
+        
+        # Start threads
+        print("\nStarting camera threads...")
+        
+        grabber_thread = threading.Thread(target=frame_grabber_thread, daemon=True)
+        viz_thread = threading.Thread(target=visualization_thread, daemon=True)
+        rec_thread = threading.Thread(target=recording_thread, daemon=True)
+        
+        grabber_thread.start()
+        viz_thread.start()
+        rec_thread.start()
+        
+        print("\nCamera view started. Press 'q' in the window to close visualization.")
+        print_commands()
+        
+        # Main command loop
+        while not g_exit_flag.is_set():
+            try:
+                cmd = input("\nCommand> ").strip().lower()
+                
+                if not cmd:
+                    continue
+                
+                parts = cmd.split()
+                command = parts[0]
+                
+                if command in ['q', 'quit']:
+                    print("Exiting...")
+                    break
+                
+                elif command in ['r', 'record']:
+                    if g_recording_flag.is_set():
+                        print("Already recording! Use 's' or 'stop' to stop first.")
+                    else:
+                        # Generate filename
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        g_recording_filename = f"{device_name.replace(' ', '_')}_{timestamp}.avi"
+                        g_recording_flag.set()
+                
+                elif command in ['s', 'stop']:
+                    if g_recording_flag.is_set():
+                        g_recording_flag.clear()
+                        time.sleep(0.5)  # Give recording thread time to finish
+                    else:
+                        print("Not currently recording.")
+                
+                elif command in ['f', 'fps']:
+                    if len(parts) > 1:
+                        try:
+                            fps = float(parts[1])
+                            check_and_set_frame_rate(g_cam, fps)
+                        except ValueError:
+                            print("Invalid FPS value. Usage: f <number>")
+                    else:
+                        print("Usage: f <fps_value>  (e.g., 'f 30')")
+                
+                elif command in ['h', 'help']:
+                    print_commands()
+                
+                else:
+                    print(f"Unknown command: {command}")
+                    print("Type 'h' or 'help' for available commands.")
+                    
+            except KeyboardInterrupt:
+                print("\nReceived Ctrl+C, exiting...")
+                break
+            except EOFError:
+                print("\nEOF received, exiting...")
+                break
+            except Exception as e:
+                print(f"Error: {e}")
+        
+        # Cleanup
+        print("\nStopping camera...")
+        g_exit_flag.set()
+        
+        # Stop recording if active
+        if g_recording_flag.is_set():
+            g_recording_flag.clear()
+            time.sleep(1.0)
+        
+        # Wait for threads to finish
+        print("Waiting for threads to finish...")
+        grabber_thread.join(timeout=3.0)
+        viz_thread.join(timeout=3.0)
+        rec_thread.join(timeout=3.0)
+        
+        # Stop camera
+        if g_cam:
+            print("Stopping camera grabbing...")
+            g_cam.MV_CC_StopGrabbing()
+            g_cam.MV_CC_CloseDevice()
+            g_cam.MV_CC_DestroyHandle()
+            
+    except Exception as e:
+        print(f"Main error: {e}")
+        
+    finally:
+        # Finalize SDK
+        MvCamera.MV_CC_Finalize()
+        print("Camera SDK finalized.")
+
+if __name__ == "__main__":
+    main()

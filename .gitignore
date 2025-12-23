@@ -1,0 +1,26 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Recorded data / outputs
+davis_output/
+data/
+data-old/
+recordings/
+*.aedat4
+*.npz
+*.npy
+*.h5
+*.hdf5
+*.raw
+*.raw.tmp_index
+*.avi
+*.mp4
+*.mkv

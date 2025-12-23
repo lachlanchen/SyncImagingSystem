@@ -1,0 +1,1341 @@
+===== .//metavision_adaptive_rate/metavision_adaptive_rate_events_splitter.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+from metavision_core.event_io import AdaptiveRateEventsIterator
+from metavision_sdk_core import AdaptiveRateEventsSplitterAlgorithm
+import numpy as np
+import cv2
+import os
+from skvideo.io import FFmpegWriter
+
+
+def events_to_diff_image(events, sensor_size, strict_coord=True):
+    """
+    Place events into an image using numpy
+    """
+    xs = events["x"]
+    ys = events["y"]
+    ps = events["p"] * 2 - 1
+
+    mask = (xs < sensor_size[1]) * (ys < sensor_size[0]) * (xs >= 0) * (ys >= 0)
+    if strict_coord:
+        assert (mask == 1).all()
+    coords = np.stack((ys*mask, xs*mask))
+    ps *= mask
+
+    try:
+        abs_coords = np.ravel_multi_index(coords, sensor_size)
+    except ValueError:
+        raise ValueError("Issue with input arrays! coords={}, min_x={}, min_y={}, max_x={}, max_y={}, coords.shape={}, sum(coords)={}, sensor_size={}".format(
+            coords, min(xs), min(ys), max(xs), max(ys), coords.shape, np.sum(coords), sensor_size))
+
+    img = np.bincount(abs_coords, weights=ps, minlength=sensor_size[0]*sensor_size[1])
+    img = img.reshape(sensor_size)
+    return img
+
+
+def split_into_frames(filename_raw, thr_var_per_event=5e-4, downsampling_factor=2, disable_display=False,
+                      filename_output_video=None):
+    """ This function loads a sequence, splits it into sharp event frames, and displays the result
+
+    This approach is an alternative to fixed delta_t (where events are gathered over a fixed time window)
+    or fixed N events (where a constant number of events are gathered). Here, the number of events per slice
+    (as well as the slice duration) is adaptive and depends on the content of the events stream.
+
+    It will generate a sequence of reasonably sharp event frames. Those could be used in a variable duration
+    processing pipeline (for example detection and tracking, or optical flow computation). We could also consider
+    dropping some of the frames to cope with limited computational budget (detection).
+
+    Args:
+        filename_raw (str): input sequence filename to process
+        thr_var_per_event (float): minimum variance per event to reach before generating a new frame
+        downsampling_factor (int): reduction factor to apply to input frame. Original coordinates will be
+                                   multiplied by 2**(-downsampling_factor)
+        disable_display (boolean): disable the output window
+        filename_output_video (str): writes an mp4 output video of the generated event frames
+    """
+
+    assert downsampling_factor == int(downsampling_factor), "Error: downsampling_factor must be an integer"
+    assert downsampling_factor >= 0, "Error: downsampling_factor must be >= 0"
+
+    mv_adaptive_rate_iterator = AdaptiveRateEventsIterator(input_path=filename_raw,
+                                                           thr_var_per_event=thr_var_per_event,
+                                                           downsampling_factor=downsampling_factor)
+
+    height, width = mv_adaptive_rate_iterator.get_size()
+
+    if filename_output_video is None:
+        video_process = None
+    else:
+        assert not os.path.exists(filename_output_video)
+        video_process = FFmpegWriter(filename_output_video)
+
+    if video_process or not disable_display:
+        img_bgr = np.zeros((height, width, 3), dtype=np.uint8)
+
+    cv2.namedWindow("img", cv2.WINDOW_NORMAL)
+
+    for events in mv_adaptive_rate_iterator:
+        assert events.size > 0
+        start_ts = events[0]["t"]
+        end_ts = events[-1]["t"]
+        print("frame: {} -> {}   delta_t: {}   fps: {}   nb_ev: {}".format(start_ts, end_ts,
+                                                                           end_ts - start_ts,
+                                                                           1e6 / (end_ts - start_ts),
+                                                                           events.size))
+        if video_process or not disable_display:
+            img = events_to_diff_image(events, sensor_size=(height, width))
+            img_bgr[...] = 0
+            img_bgr[img < 0, 0] = 255
+            img_bgr[img > 0, 1] = 255
+
+            chunk_start_ts = events[0]["t"]
+            chunk_end_ts = events[-1]["t"]
+            delta_t_frame = chunk_end_ts - chunk_start_ts + 1
+            frame_txt = "ts: {} -> {}  delta_t: {}  fps: {}  (nb_ev): {}".format(chunk_start_ts, chunk_end_ts,
+                                                                                 delta_t_frame,
+                                                                                 int(1.e6/delta_t_frame),
+                                                                                 events.size)
+            img_bgr[20:45, ...] = 0
+            cv2.putText(img_bgr,
+                        frame_txt,
+                        (int(0.05 * width), 40),
+                        cv2.FONT_HERSHEY_PLAIN, 1.0, (200, 200, 100))
+
+        if video_process:
+            video_process.writeFrame(img_bgr.astype(np.uint8)[..., ::-1])
+        if not disable_display:
+            cv2.imshow("img", img_bgr)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+    if video_process:
+        video_process.close()
+    if not disable_display:
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    import fire
+    fire.Fire(split_into_frames)
+
+
+===== .//metavision_csv_viewer/metavision_csv_viewer.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Code sample demonstrating how to use Metavision SDK to display events from a CSV file.
+"""
+
+
+import numpy as np
+import pandas as pd
+from metavision_sdk_base import EventCD, EventCDBuffer
+from metavision_sdk_core import PeriodicFrameGenerationAlgorithm
+from metavision_sdk_ui import EventLoop, BaseWindow, MTWindow, UIAction, UIKeyEvent
+
+
+# CSV file contains events written in the following format:
+# x1,y1,t1,p1
+# x2,y2,t2,p2
+# ...
+# xn,yn,tn,pn
+
+events_chunksize = 5000
+accumulation_time_us = 10000
+
+
+def parse_args():
+    import argparse
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Metavision CSV Viewer sample.',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-i', '--input-csv-file', dest='input_path', type=str,
+                        help="Path to input CSV file.", required=True)
+    parser.add_argument('--width', dest='width', type=int, default=640,
+                        help="Width of the sensor associated to the CSV file.")
+    parser.add_argument('--height', dest='height', type=int, default=480,
+                        help="Height of the sensor associated to the CSV file.")
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    """ Main """
+    args = parse_args()
+
+    print("Code sample demonstrating how to use Metavision SDK to display events from a CSV file.")
+
+    # Event Frame Generator
+    event_frame_gen = PeriodicFrameGenerationAlgorithm(args.width, args.height, accumulation_time_us)
+
+    # Window - Graphical User Interface
+    with MTWindow(title="Metavision CSV Viewer", width=args.width, height=args.height, mode=BaseWindow.RenderMode.BGR) as window:
+        def on_cd_frame_cb(ts, cd_frame):
+            # Dispatch system events to the window
+            EventLoop.poll_and_dispatch()
+            window.show_async(cd_frame)
+
+        event_frame_gen.set_output_callback(on_cd_frame_cb)
+
+        def keyboard_cb(key, scancode, action, mods):
+            if action != UIAction.RELEASE:
+                return
+            if key == UIKeyEvent.KEY_ESCAPE or key == UIKeyEvent.KEY_Q:
+                window.set_close_flag()
+
+        window.set_keyboard_callback(keyboard_cb)
+
+        # Parse CSV using Pandas
+        reader = pd.read_csv(args.input_path, delimiter=',', chunksize=events_chunksize, header=None, names=[
+                             'x', 'y', 'p', 't'], dtype={'x': np.ushort, 'y': np.ushort, 'p': np.short, 't': np.longlong})
+        events_buf = EventCDBuffer(events_chunksize)
+        np_evs = events_buf.numpy()
+        # Read CSV by chunks
+        for chunk in reader:
+            buf = chunk.to_numpy()
+            buf_size = int(buf.size/4)
+
+            # The last chunk won't necessarily be of size 'events_chunksize'
+            if buf_size != np_evs.size:
+                events_buf = EventCDBuffer(buf_size)
+                np_evs = events_buf.numpy()
+
+            np_evs['x'] = buf[:, 0]
+            np_evs['y'] = buf[:, 1]
+            np_evs['p'] = buf[:, 2]
+            np_evs['t'] = buf[:, 3]
+
+            # Feed events to the Frame Generator
+            event_frame_gen.process_events(np_evs)
+            if window.should_close():
+                break
+
+
+if __name__ == "__main__":
+    main()
+
+
+===== .//metavision_event_frame_viewer/metavision_event_frame_viewer.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Code sample to display the content of DIFF3D and HISTO3D event frames
+"""
+
+from metavision_core.event_io.raw_info import raw_histo_header_bits_per_channel
+from metavision_core.event_io import EventFrameIterator
+
+import os
+import numpy as np
+import cv2
+from skvideo.io import FFmpegWriter
+
+
+def display_event_frames(input_path, output_video_path=None, disable_display=False):
+    if output_video_path:
+        assert not os.path.exists(output_video_path), f"Error: path {output_video_path} already exists"
+    video_writer = None
+    if output_video_path:
+        video_writer = FFmpegWriter(output_video_path)
+
+    mv_it = EventFrameIterator(input_path=input_path)
+    frame_type = mv_it.get_frame_type()
+    if frame_type == "DIFF3D":
+        if not disable_display:
+            cv2.namedWindow("img", cv2.WINDOW_NORMAL)
+    elif frame_type == "HISTO3D":
+        if not disable_display:
+            cv2.namedWindow("img_neg", cv2.WINDOW_NORMAL)
+            cv2.namedWindow("img_pos", cv2.WINDOW_NORMAL)
+            cv2.namedWindow("img", cv2.WINDOW_NORMAL)
+        bits_n, bits_p = raw_histo_header_bits_per_channel(input_path)
+    else:
+        raise NotImplementedError(f"Unsupported type of frame: {frame_type}")
+
+    stop = False
+    for frame_idx, frame in enumerate(mv_it):
+        if frame_type == "DIFF3D":
+            print(f"frame_idx: {frame_idx}, shape: {frame.shape}, min: {frame.min()}, max: {frame.max()}")
+            assert frame.dtype == np.int8
+            assert frame.shape == (320, 320)
+            img = frame.astype(np.uint8) + 128
+            if not disable_display:
+                cv2.imshow("img", img)
+            if video_writer:
+                video_writer.writeFrame(img)
+
+        elif frame_type == "HISTO3D":
+            print(f"frame_idx: {frame_idx}, shape: {frame.shape},    " +
+                  f"negative channel (min,max): ({frame[..., 0].min()},{frame[..., 0].max()})    " +
+                  f"positive channel (min,max): ({frame[..., 1].min()},{frame[..., 1].max()})    ")
+            assert frame.dtype == np.uint8
+            assert frame.shape == (320, 320, 2)
+            assert (frame[:, :, 0] < 2**bits_n).all()
+            assert (frame[:, :, 1] < 2**bits_p).all()
+
+            img_neg = np.ascontiguousarray(frame[..., 0]) * 2**(8 - bits_n)
+            img_pos = np.ascontiguousarray(frame[..., 1]) * 2**(8 - bits_p)
+            img = np.concatenate([img_neg[..., None], img_pos[..., None],
+                                  np.zeros((320, 320, 1), dtype=np.uint8)], axis=2)
+            if not disable_display:
+                cv2.imshow("img_neg", img_neg)
+                cv2.imshow("img_pos", img_pos)
+                cv2.imshow("img", img[..., ::-1])
+            if video_writer:
+                video_writer.writeFrame(img)
+        else:
+            raise NotImplementedError(f"Unsupported type of frame: {frame_type}")
+
+        if not disable_display:
+            k = cv2.waitKey(1)
+            if k == ord('q'):
+                print("!! STOP !!")
+                break
+
+    if not disable_display:
+        cv2.destroyAllWindows()
+    if video_writer:
+        video_writer.close()
+
+
+if __name__ == "__main__":
+    import fire
+    fire.Fire(display_event_frames)
+
+
+===== .//metavision_filtering/metavision_filtering.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Code sample showing how to create a simple application to filter and display events.
+"""
+
+from enum import Enum
+from metavision_core.event_io import EventsIterator
+from metavision_core.event_io import LiveReplayEventsIterator, is_live_camera
+from metavision_sdk_core import PeriodicFrameGenerationAlgorithm, PolarityFilterAlgorithm, RoiFilterAlgorithm
+from metavision_sdk_ui import EventLoop, BaseWindow, MTWindow, UIAction, UIKeyEvent
+
+
+roi_crop_width = 150
+
+
+class Polarity(Enum):
+    ALL = -1,
+    OFF = 0,
+    ON = 1
+
+
+def parse_args():
+    import argparse
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Metavision Filtering sample.',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '-i', '--input-raw-file', dest='input_path', default="",
+        help="Path to input RAW file. If not specified, the live stream of the first available camera is used. "
+        "If it's a camera serial number, it will try to open that camera instead.")
+    parser.add_argument(
+        '-r', '--replay_factor', type=float, default=1,
+        help="Replay Factor. If greater than 1.0 we replay with slow-motion, otherwise this is a speed-up over real-time.")
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    """ Main """
+    args = parse_args()
+
+    print("Code sample showing how to create a simple application to filter and display events.")
+    print("Available keyboard options:\n"
+          "  - R: Toggle the ROI filter algorithm\n"
+          "  - P: Show only events of positive polarity\n"
+          "  - N: Show only events of negative polarity\n"
+          "  - A: Show all events\n"
+          "  - Q/Escape: Quit the application\n")
+
+    # Events iterator on Camera or RAW file
+    mv_iterator = EventsIterator(input_path=args.input_path, delta_t=1000)
+    if args.replay_factor > 0 and not is_live_camera(args.input_path):
+        mv_iterator = LiveReplayEventsIterator(mv_iterator, replay_factor=args.replay_factor)
+    height, width = mv_iterator.get_size()  # Camera Geometry
+
+    polarity_filters = {Polarity.OFF: PolarityFilterAlgorithm(0), Polarity.ON: PolarityFilterAlgorithm(1)}
+    roi_filter = RoiFilterAlgorithm(x0=roi_crop_width, y0=roi_crop_width,
+                                    x1=width - roi_crop_width, y1=height - roi_crop_width)
+    events_buf = RoiFilterAlgorithm.get_empty_output_buffer()
+    use_roi_filter = False
+    polarity = Polarity.ALL
+
+    # Event Frame Generator
+    event_frame_gen = PeriodicFrameGenerationAlgorithm(width, height, accumulation_time_us=10000)
+
+    # Window - Graphical User Interface (Display filtered events and process keyboard events)
+    with MTWindow(title="Metavision Filtering", width=width, height=height, mode=BaseWindow.RenderMode.BGR) as window:
+        def on_cd_frame_cb(ts, cd_frame):
+            # Dispatch system events to the window
+            EventLoop.poll_and_dispatch()
+            window.show_async(cd_frame)
+
+        event_frame_gen.set_output_callback(on_cd_frame_cb)
+
+        def keyboard_cb(key, scancode, action, mods):
+            nonlocal use_roi_filter
+            nonlocal polarity
+
+            if action != UIAction.RELEASE:
+                return
+            if key == UIKeyEvent.KEY_ESCAPE or key == UIKeyEvent.KEY_Q:
+                window.set_close_flag()
+            elif key == UIKeyEvent.KEY_A:
+                # Show all events
+                polarity = Polarity.ALL
+            elif key == UIKeyEvent.KEY_N:
+                # Show only negative events
+                polarity = Polarity.OFF
+            elif key == UIKeyEvent.KEY_P:
+                # Show only positive events
+                polarity = Polarity.ON
+            elif key == UIKeyEvent.KEY_R:
+                # Toggle ROI filter
+                use_roi_filter = not use_roi_filter
+
+        window.set_keyboard_callback(keyboard_cb)
+
+        # Process events
+        for evs in mv_iterator:
+            if use_roi_filter:
+                roi_filter.process_events(evs, events_buf)
+                if polarity in polarity_filters:
+                    polarity_filters[polarity].process_events_(events_buf)
+                event_frame_gen.process_events(events_buf)
+            elif polarity in polarity_filters:
+                polarity_filters[polarity].process_events(evs, events_buf)
+                event_frame_gen.process_events(events_buf)
+            else:
+                event_frame_gen.process_events(evs)
+
+            if window.should_close():
+                break
+
+
+if __name__ == "__main__":
+    main()
+
+
+===== .//metavision_interop/aedat_reader.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+AEDAT Reader
+
+This is an example on how to read a different format.
+Here we use the "aedat" library:
+https://github.com/neuromorphicsystems/aedat
+
+You can install the library like so:
+python3 -m pip install aedat
+"""
+
+import aedat
+import numpy as np
+from metavision_sdk_base import EventCD
+
+
+class AEDATBaseReader(object):
+    """
+    BaseReader for .aedat4 format.
+    We write a base iterator returning numpy buffers of type EventCD.
+    """
+
+    def __init__(self, aedat_path):
+        self.decoder = aedat.Decoder(aedat_path)
+        self.t0 = None
+
+    def is_done(self):
+        return False
+
+    def __del__(self):
+        pass
+
+    def get_size(self):
+        for packet in self.decoder:
+            if 'frame' in packet:
+                return packet['frame']['height'], packet['frame']['width']
+        raise Exception('frame size not found')
+
+    def seek_time(self, ts):
+        if ts != 0:
+            raise Exception('time seek in aedat not implemented')
+
+    def __iter__(self):
+        t0 = None
+        for packet in self.decoder:
+            if 'events' in packet:
+                events = packet['events']
+                num = len(events)
+                if t0 is None:
+                    t0 = events['t'][0]
+                event_buffer = np.zeros((num,), dtype=EventCD)
+                event_buffer['t'][:num] = (events['t'] - t0)
+                event_buffer['x'][:num] = events['x']
+                event_buffer['y'][:num] = events['y']
+                event_buffer['p'][:num] = events['on']
+                yield event_buffer
+            else:
+                continue
+
+
+===== .//metavision_interop/csv_reader.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+CSV Reader
+
+This class can read the CSV files from the HDR dataset available at http://rpg.ifi.uzh.ch/E2VID.html produced
+for the paper "High Speed and High Dynamic Range Video with an Event Cameras"
+
+The reader handles .txt files in CSV format (t, x, y, p) and .zip compressed archive of those .txt files
+"""
+
+import numpy as np
+import pandas as pd
+from metavision_sdk_base import EventCD
+
+
+class CSVBaseReader:
+    """
+    Reads events from a '.txt' or '.zip' file, and packages the events into
+    non-overlapping event windows, each containing a fixed number of events.
+    """
+
+    def __init__(self, path, n_events=10000, start_index=0):
+        header = next(iter(pd.read_csv(path, nrows=0)))
+        width, height = header.split(' ')
+        self.height, self.width = int(height), int(width)
+        self.iterator = pd.read_csv(path, delim_whitespace=True, header='infer',
+                                    names=['t', 'x', 'y', 'pol'],
+                                    dtype={'t': np.float64, 'x': np.int16, 'y': np.int16, 'pol': np.int16},
+                                    engine='c',
+                                    skiprows=start_index + 1, chunksize=n_events, nrows=None, memory_map=True)
+        self.event_buffer = np.zeros((int(1e6),), dtype=EventCD)
+
+    def is_done(self):
+        return False
+
+    def __del__(self):
+        pass
+
+    def get_size(self):
+        return self.height, self.width
+
+    def __iter__(self):
+        return self
+
+    def seek_time(self, ts):
+        if ts != 0:
+            raise Exception('time seek in csv not implemented')
+
+    def __next__(self):
+        try:
+            event_window = self.iterator.__next__().values
+        except BaseException:
+            raise StopIteration
+        num = len(event_window)
+        y = self.height - 1 - event_window[:, 2].copy()
+        t = (event_window[:, 0] * 1e6)
+        self.event_buffer[:num]['x'] = event_window[:, 1]
+        self.event_buffer[:num]['y'] = y
+        self.event_buffer[:num]['t'] = t
+        self.event_buffer[:num]['p'] = event_window[:, 3] > 0
+        return self.event_buffer[:num]
+
+
+===== .//metavision_interop/extended_events_iterator.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Extended Metavision Iterator
+We show here how to integrate your own format in an extension of the factory class EventsIterator
+"""
+
+from metavision_core.event_io.events_iterator import EventsIterator
+from metavision_core.event_io.raw_reader import RawReaderBase
+from metavision_core.event_io.py_reader import EventDatReader
+from metavision_core.event_io.meta_event_producer import MetaEventBufferProducer
+from csv_reader import CSVBaseReader
+
+ROS = True
+AEDAT = True
+
+try:
+    from ros_reader import RosBaseReader
+except:
+    ROS = False
+try:
+    from aedat_reader import AEDATBaseReader
+except:
+    AEDAT = False
+
+
+class ExtendedEventsIterator(EventsIterator):
+    """
+    We extend the EventsIterator to more formats.
+    It can handle the following:
+
+    - raw
+    - dat
+    - aedat
+    - zipped csv
+    - rosbag
+
+    Attributes:
+        reader : class handling the file or camera.
+        delta_t (int): Duration of served event slice in us.
+        max_duration (int): If not None, maximal duration of the iteration in us.
+        end_ts (int): If max_duration is not None, last timestamp to consider.
+        relative_timestamps (boolean): Whether the timestamp of served events are relative to the current
+            reader timestamp, or since the beginning of the recording.
+    Args:
+        input_path (str): Path to the file to read. If `path` is an empty string or a camera serial number it will try to open
+            that camera instead.
+        start_ts (int): First timestamp to consider.
+        mode (string): Load by timeslice or number of events. Either "delta_t", "n_events" or "mixed",
+            where mixed uses both delta_t and n_events and chooses the first met criterion.
+        delta_t (int): Duration of served event slice in us.
+        n_events (int): Number of events in the timeslice.
+        max_duration (int): If not None, maximal duration of the iteration in us.
+        relative_timestamps (boolean): Whether the timestamp of served events are relative to the current
+            reader timestamp, or since the beginning of the recording.
+        **kwargs: Arbitrary keyword arguments passed to the underlying RawReaderBase or
+            EventDatReader.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _init_readers(self, input_path, **kwargs):
+        if isinstance(input_path, type("")):
+            if input_path.endswith(".dat"):
+                self.reader = EventDatReader(input_path, **kwargs)
+            elif input_path.endswith(".bag") and ROS:
+                ros_reader = RosBaseReader(input_path)
+                self.reader = MetaEventBufferProducer(
+                    ros_reader, mode=self.mode, delta_t=self.delta_t, n_events=self.n_events,
+                    relative_timestamps=self.relative_timestamps)
+            elif input_path.endswith(".zip") or input_path.endswith(".txt"):
+                csv_reader = CSVBaseReader(input_path)
+                self.reader = MetaEventBufferProducer(
+                    csv_reader, mode=self.mode, delta_t=self.delta_t, n_events=self.n_events,
+                    relative_timestamps=self.relative_timestamps)
+            elif input_path.endswith(".aedat4") and AEDAT:
+                aedat_reader = AEDATBaseReader(input_path)
+                self.reader = MetaEventBufferProducer(
+                    aedat_reader, mode=self.mode, delta_t=self.delta_t, n_events=self.n_events,
+                    relative_timestamps=self.relative_timestamps)
+            elif input_path.endswith(".raw"):
+                self.reader = RawReaderBase(input_path, delta_t=self.delta_t, ev_count=self.n_events, **kwargs)
+            else:
+                if input_path.endswith(".bag") and not ROS:
+                    print('rosbag is not installed!')
+                if input_path.endswith(".aedat4") and not AEDAT:
+                    print('aedat is not installed!')
+
+                raise BaseException("format not handled!")
+        else:
+            # we assume input_path is an actual device
+            self.reader = RawReaderBase.from_device(input_path, delta_t=self.delta_t, ev_count=self.n_events, **kwargs)
+
+
+===== .//metavision_interop/metavision_interop.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Code sample to show how to work simply with other event-based storage formats.
+
+We provide here 3 examples to show how to read other popular event formats:
+- rosbag: .bag files
+- csv: .txt files (also handled as a .zip compressed archive)
+- aedat4: .aedat4 files
+"""
+
+import argparse
+import numpy as np
+import cv2
+from extended_events_iterator import ExtendedEventsIterator
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Metavision interoperability sample.',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        'path', default="",
+        help="Path to input event file. The format can be either .bag (ros), .zip, .txt or .aedat4")
+    parser.add_argument(
+        '-m', '--mode', choices=["delta_t", "n_events", "mixed"],
+        type=str, default='delta_t', help='bufferization strategy: delta_t, n_events or mixed')
+    parser.add_argument(
+        '-d', '--delta-t', type=int, default=5000, help='fixed duration for the bufferization')
+    parser.add_argument(
+        '-n', '--n-events', type=int, default=5000, help='fixed n events for the bufferization')
+    args = parser.parse_args()
+    return args
+
+
+def read_exotic_format(path, mode, delta_t, n_events):
+    """
+    Reads alternative formats of AER events.
+
+    Args:
+        path (str): path to input file (can be .bag, .txt, .zip or .aedat4)
+        mode (str): "delta_t", "n_events" or "mixed" mode to read events
+        delta_t (int): fixed duration
+        n_events (int): fixed number of events
+    """
+    reader = ExtendedEventsIterator(path, mode=mode, delta_t=delta_t, n_events=n_events)
+    height, width = reader.get_size()
+    img = np.zeros((height, width, 3), dtype=np.uint8)
+    print('height, width: ', height, width)
+    for events in reader:
+        img[...] = 0
+        if len(events):
+            x, y, p = events['x'], events['y'], events['p']
+            img[y[p == 1], x[p == 1], 1] = 255
+            img[y[p == 0], x[p == 0], 2] = 255
+        cv2.imshow('img', img)
+        cv2.waitKey(5)
+
+
+if __name__ == '__main__':
+    read_exotic_format(**parse_args().__dict__)
+
+
+===== .//metavision_interop/ros_reader.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+RosBag Reader
+
+This is an example on how to read a different format.
+Here we use the "rospy" library to read .bag files:
+https://github.com/rospypi/simple
+
+You can install the library like so:
+python3 -m pip install --extra-index-url https://rospypi.github.io/simple/ rospy rosbag
+"""
+
+import rosbag
+import numpy as np
+
+from itertools import islice
+from metavision_sdk_base import EventCD
+
+
+class RosBaseReader(object):
+    """
+    BaseReader for .bag format.
+    We write a base iterator returning numpy buffers of type EventCD.
+    """
+
+    def __init__(self, rosbag_path, event_topic='/dvs/events'):
+        self.bag = rosbag.Bag(rosbag_path, 'r')
+        self.event_topic = event_topic
+        topics = self.bag.get_type_and_topic_info().topics
+        assert event_topic in topics, 'event topic is not present'
+        self.t0 = None
+        self.height, self.width = -1, -1
+        for topic, msg, t in islice(self.bag.read_messages(), 6):
+            if hasattr(msg, "width"):
+                self.height = msg.height
+                self.width = msg.width
+        if self.height < 0 or self.width < 0:
+            raise BaseException("No Message with height or width fields")
+
+    def is_done(self):
+        return False
+
+    def __del__(self):
+        pass
+
+    def get_size(self):
+        return self.height, self.width
+
+    def seek_time(self, ts):
+        if ts != 0:
+            raise Exception('time seek not implemented in rospy')
+
+    def __iter__(self):
+        t0 = None
+        for topic, msg, t in self.bag.read_messages():
+            if topic == self.event_topic:
+                evs = msg.events
+                num = len(evs)
+                if t0 is None:
+                    t0 = evs[0].ts.to_nsec() / 1000
+                event_buffer = np.zeros((num,), dtype=EventCD)
+                for n, ev in enumerate(evs):
+                    event_buffer[n]['x'] = ev.x
+                    event_buffer[n]['y'] = ev.y
+                    event_buffer[n]['p'] = ev.polarity
+                    event_buffer[n]['t'] = ev.ts.to_nsec() / 1000 - t0
+                yield event_buffer
+
+
+===== .//metavision_raw_to_csv/metavision_raw_to_csv.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Metavision RAW or DAT to CSV python sample.
+"""
+
+from metavision_core.event_io import EventsIterator
+import os
+from tqdm import tqdm
+
+
+def parse_args():
+    import argparse
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Metavision RAW or DAT to CSV.',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-i', '--input-file', dest='input_path', required=True, help="Path to input RAW/DAT file")
+    parser.add_argument('-o', '--output-dir', required=True, help="Path to csv output directory")
+    parser.add_argument('-s', '--start-ts', type=int, default=0, help="start time in microsecond")
+    parser.add_argument('-d', '--max-duration', type=int, default=1e6 * 60, help="maximum duration in microsecond")
+    parser.add_argument('--delta-t', type=int, default=1000000, help="Duration of served event slice in us.")
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    args = parse_args()
+
+    if os.path.isfile(args.input_path):
+        output_file = os.path.join(args.output_dir, os.path.basename(args.input_path)[:-4] + ".csv")
+    else:
+        raise TypeError(f'Fail to access file: {args.input_path}')
+
+    mv_iterator = EventsIterator(input_path=args.input_path, delta_t=args.delta_t, start_ts=args.start_ts,
+                                 max_duration=args.max_duration)
+
+    with open(output_file, 'w') as csv_file:
+        for evs in tqdm(mv_iterator, total=args.max_duration // args.delta_t):
+            for (x, y, p, t) in evs:
+                csv_file.write("%d,%d,%d,%d\n" % (x, y, p, t))
+
+
+if __name__ == "__main__":
+    main()
+
+
+===== .//metavision_sdk_get_started/metavision_sdk_get_started.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Metavision SDK Get Started.
+"""
+
+
+from metavision_core.event_io import EventsIterator
+from metavision_sdk_core import PeriodicFrameGenerationAlgorithm
+from metavision_sdk_ui import EventLoop, BaseWindow, Window, UIAction, UIKeyEvent
+
+accumulation_time_us = 10000
+
+
+def parse_args():
+    import argparse
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Metavision SDK Get Started sample.',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '-i', '--input-raw-file', dest='input_path', default="",
+        help="Path to input RAW file. If not specified, the live stream of the first available camera is used. "
+        "If it's a camera serial number, it will try to open that camera instead.")
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    """ Main """
+    args = parse_args()
+
+    # Events iterator on Camera or RAW file
+    mv_iterator = EventsIterator(input_path=args.input_path, delta_t=1000)
+    height, width = mv_iterator.get_size()  # Camera Geometry
+
+    # Window - Graphical User Interface
+    with Window(title="Metavision SDK Get Started", width=width, height=height, mode=BaseWindow.RenderMode.BGR) as window:
+        def keyboard_cb(key, scancode, action, mods):
+            if action != UIAction.RELEASE:
+                return
+            if key == UIKeyEvent.KEY_ESCAPE or key == UIKeyEvent.KEY_Q:
+                window.set_close_flag()
+
+        window.set_keyboard_callback(keyboard_cb)
+
+        # Event Frame Generator
+        event_frame_gen = PeriodicFrameGenerationAlgorithm(sensor_width=width, sensor_height=height,
+                                                           accumulation_time_us=accumulation_time_us)
+
+        def on_cd_frame_cb(ts, cd_frame):
+            window.show(cd_frame)
+
+        event_frame_gen.set_output_callback(on_cd_frame_cb)
+
+        global_counter = 0  # This will track how many events we processed
+        global_max_t = 0  # This will track the highest timestamp we processed
+
+        # Process events
+        for evs in mv_iterator:
+            # Dispatch system events to the window
+            EventLoop.poll_and_dispatch()
+
+            event_frame_gen.process_events(evs)
+
+            print("----- New event buffer! -----")
+            if evs.size == 0:
+                print("The current event buffer is empty.")
+            else:
+                min_t = evs['t'][0]   # Get the timestamp of the first event of this callback
+                max_t = evs['t'][-1]  # Get the timestamp of the last event of this callback
+                global_max_t = max_t  # Events are ordered by timestamp, so the current last event has the highest timestamp
+
+                counter = evs.size  # Local counter
+                global_counter += counter  # Increase global counter
+
+                print(f"There were {counter} events in this event buffer.")
+                print(f"There were {global_counter} total events up to now.")
+                print(f"The current event buffer included events from {min_t} to {max_t} microseconds.")
+                print("----- End of the event buffer! -----")
+
+            if window.should_close():
+                break
+
+        # Print the global statistics
+        duration_seconds = global_max_t / 1.0e6
+        print(f"There were {global_counter} events in total.")
+        print(f"The total duration was {duration_seconds:.2f} seconds.")
+        if duration_seconds >= 1:  # No need to print this statistics if the video was too short
+            print(f"There were {global_counter / duration_seconds :.2f} events per second on average.")
+
+
+if __name__ == "__main__":
+    main()
+
+
+===== .//metavision_simple_recorder/metavision_simple_recorder.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Sample code that demonstrates how to use Metavision SDK to record events from a live camera in a RAW file
+"""
+
+from metavision_core.event_io.raw_reader import initiate_device
+from metavision_core.event_io import EventsIterator
+from metavision_sdk_core import PeriodicFrameGenerationAlgorithm, ColorPalette
+from metavision_sdk_ui import EventLoop, BaseWindow, MTWindow, UIAction, UIKeyEvent
+import argparse
+import time
+import os
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Metavision RAW file Recorder sample.',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '-o', '--output-dir', default="", help="Directory where to create RAW file with recorded event data")
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    """ Main """
+    args = parse_args()
+
+    # HAL Device on live camera
+    device = initiate_device("")
+
+    # Start the recording
+    if device.get_i_events_stream():
+        log_path = "recording_" + time.strftime("%y%m%d_%H%M%S", time.localtime()) + ".raw"
+        if args.output_dir != "":
+            log_path = os.path.join(args.output_dir, log_path)
+        print(f'Recording to {log_path}')
+        device.get_i_events_stream().log_raw_data(log_path)
+
+    # Events iterator on Device
+    mv_iterator = EventsIterator.from_device(device=device)
+    height, width = mv_iterator.get_size()  # Camera Geometry
+
+    # Window - Graphical User Interface
+    with MTWindow(title="Metavision Events Viewer", width=width, height=height,
+                  mode=BaseWindow.RenderMode.BGR) as window:
+        def keyboard_cb(key, scancode, action, mods):
+            if key == UIKeyEvent.KEY_ESCAPE or key == UIKeyEvent.KEY_Q:
+                window.set_close_flag()
+
+        window.set_keyboard_callback(keyboard_cb)
+
+        # Event Frame Generator
+        event_frame_gen = PeriodicFrameGenerationAlgorithm(sensor_width=width, sensor_height=height, fps=25,
+                                                           palette=ColorPalette.Dark)
+
+        def on_cd_frame_cb(ts, cd_frame):
+            window.show_async(cd_frame)
+
+        event_frame_gen.set_output_callback(on_cd_frame_cb)
+
+        # Process events
+        for evs in mv_iterator:
+            # Dispatch system events to the window
+            EventLoop.poll_and_dispatch()
+            event_frame_gen.process_events(evs)
+
+            if window.should_close():
+                # Stop the recording
+                device.get_i_events_stream().stop_log_raw_data()
+                break
+
+
+if __name__ == "__main__":
+    main()
+
+
+===== .//metavision_simple_viewer/metavision_simple_viewer.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Sample code that demonstrates how to use Metavision SDK to visualize events from a live camera or a RAW file
+"""
+
+from metavision_core.event_io import EventsIterator, LiveReplayEventsIterator, is_live_camera
+from metavision_sdk_core import PeriodicFrameGenerationAlgorithm, ColorPalette
+from metavision_sdk_ui import EventLoop, BaseWindow, MTWindow, UIAction, UIKeyEvent
+import argparse
+import os
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Metavision Simple Viewer sample.',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '-i', '--input-raw-file', dest='input_path', default="",
+        help="Path to input RAW file. If not specified, the live stream of the first available camera is used. "
+        "If it's a camera serial number, it will try to open that camera instead.")
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    """ Main """
+    args = parse_args()
+
+    # Events iterator on Camera or RAW file
+    mv_iterator = EventsIterator(input_path=args.input_path, delta_t=1000)
+    height, width = mv_iterator.get_size()  # Camera Geometry
+
+    # Helper iterator to emulate realtime
+    if not is_live_camera(args.input_path):
+        mv_iterator = LiveReplayEventsIterator(mv_iterator)
+
+    # Window - Graphical User Interface
+    with MTWindow(title="Metavision Events Viewer", width=width, height=height,
+                  mode=BaseWindow.RenderMode.BGR) as window:
+        def keyboard_cb(key, scancode, action, mods):
+            if key == UIKeyEvent.KEY_ESCAPE or key == UIKeyEvent.KEY_Q:
+                window.set_close_flag()
+
+        window.set_keyboard_callback(keyboard_cb)
+
+        # Event Frame Generator
+        event_frame_gen = PeriodicFrameGenerationAlgorithm(sensor_width=width, sensor_height=height, fps=25,
+                                                           palette=ColorPalette.Dark)
+
+        def on_cd_frame_cb(ts, cd_frame):
+            window.show_async(cd_frame)
+
+        event_frame_gen.set_output_callback(on_cd_frame_cb)
+
+        # Process events
+        for evs in mv_iterator:
+            # Dispatch system events to the window
+            EventLoop.poll_and_dispatch()
+            event_frame_gen.process_events(evs)
+
+            if window.should_close():
+                break
+
+
+if __name__ == "__main__":
+    main()
+
+
+===== .//metavision_sync/metavision_sync.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Sample code that demonstrates how to use Metavision HAL Python API to synchronize two cameras.
+"""
+
+from metavision_core.event_io.raw_reader import initiate_device
+from metavision_core.event_io import EventsIterator, LiveReplayEventsIterator
+from metavision_sdk_core import PeriodicFrameGenerationAlgorithm, ColorPalette
+from metavision_sdk_ui import EventLoop, BaseWindow, MTWindow, UIAction, UIKeyEvent
+import argparse
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Metavision camera synchronization sample.',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '-s', '--serial-number', dest='input_path', default="",
+        help="Camera serial number. If not specified, the live stream of the first available camera is used.")
+
+    parser.add_argument(
+        '-m', '--mode-selection', dest='cam_mode', default='slave',
+        help="Mode selected for camera: master or slave. If not specified, Camera will be in slave mode.")
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    """ Main """
+    args = parse_args()
+
+    # Creation of HAL device
+    device = initiate_device(path=args.input_path)
+
+    # then we use the facility i_device_control to set mode master/slave
+    if device.get_i_camera_synchronization():
+        if args.cam_mode == 'master':
+            device.get_i_camera_synchronization().set_mode_master()
+            print('Set mode master successful. Make sure to start slave camera first')
+        else:
+            device.get_i_camera_synchronization().set_mode_slave()
+            print('Set mode slave successful. Start master camera to launch streaming ')
+
+    # Events iterator on the device
+    mv_iterator = EventsIterator.from_device(device=device)
+    height, width = mv_iterator.get_size()  # Camera Geometry
+
+    # Window - Graphical User Interface
+    title = "Metavision Sync - Master" if args.cam_mode == 'master' else "Metavision Sync - Slave"
+    with MTWindow(title=title, width=width, height=height,
+                  mode=BaseWindow.RenderMode.BGR) as window:
+        def keyboard_cb(key, scancode, action, mods):
+            if key == UIKeyEvent.KEY_ESCAPE or key == UIKeyEvent.KEY_Q:
+                window.set_close_flag()
+
+        window.set_keyboard_callback(keyboard_cb)
+
+        # Event Frame Generator
+        event_frame_gen = PeriodicFrameGenerationAlgorithm(sensor_width=width, sensor_height=height, fps=25,
+                                                           palette=ColorPalette.Dark)
+
+        def on_cd_frame_cb(ts, cd_frame):
+            window.show_async(cd_frame)
+
+        event_frame_gen.set_output_callback(on_cd_frame_cb)
+
+        for evs in mv_iterator:
+            # Dispatch system events to the window in order to catch keystrokes
+            # This won't be available on the slave if the master is not streaming at the same time
+            # (because in that case, the slave is in waiting mode with no event generated)
+            EventLoop.poll_and_dispatch()
+            event_frame_gen.process_events(evs)
+            if window.should_close():
+                break
+
+
+if __name__ == "__main__":
+    main()
+
+
+===== .//metavision_time_surface/metavision_time_surface.py =====
+# Copyright (c) Prophesee S.A.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+# on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and limitations under the License.
+
+"""
+Example of using Metavision SDK Core Python API for visualizing Time Surface of events
+"""
+
+from metavision_core.event_io import EventsIterator, LiveReplayEventsIterator, is_live_camera
+from metavision_sdk_core import TimeSurfaceProducerAlgorithmMergePolarities, MostRecentTimestampBuffer
+from metavision_sdk_ui import EventLoop, BaseWindow, MTWindow, UIAction, UIKeyEvent
+import numpy as np
+import cv2
+import argparse
+
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Metavision Time Surface sample.',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '-i', '--input-raw-file', dest='input_path', default="",
+        help="Path to input RAW file. If not specified, the live stream of the first available camera is used. "
+        "If it's a camera serial number, it will try to open that camera instead.")
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    """ Main """
+    args = parse_args()
+
+    last_processed_timestamp = 0
+
+    # Events iterator on Camera or RAW file
+    mv_iterator = EventsIterator(input_path=args.input_path, delta_t=10000)
+    height, width = mv_iterator.get_size()  # Camera Geometry
+
+    # Helper iterator to emulate realtime
+    if not is_live_camera(args.input_path):
+        mv_iterator = LiveReplayEventsIterator(mv_iterator)
+
+    # Window - Graphical User Interface
+    with MTWindow(title="Metavision Events Viewer", width=width, height=height,
+                  mode=BaseWindow.RenderMode.BGR) as window:
+        def keyboard_cb(key, scancode, action, mods):
+            if key == UIKeyEvent.KEY_ESCAPE or key == UIKeyEvent.KEY_Q:
+                window.set_close_flag()
+
+        window.set_keyboard_callback(keyboard_cb)
+
+        time_surface = MostRecentTimestampBuffer(rows=height, cols=width, channels=1)
+        ts_prod = TimeSurfaceProducerAlgorithmMergePolarities(width=width, height=height)
+
+        def cb_time_surface(timestamp, data):
+            nonlocal last_processed_timestamp
+            nonlocal time_surface
+            last_processed_timestamp = timestamp
+            time_surface = data
+
+        ts_prod.set_output_callback(cb_time_surface)
+        img = np.empty((height, width), dtype=np.uint8)
+
+        # Process events
+        for evs in mv_iterator:
+            # Dispatch system events to the window
+            EventLoop.poll_and_dispatch()
+            ts_prod.process_events(evs)
+            time_surface.generate_img_time_surface(last_processed_timestamp, 10000, img)
+            window.show_async(cv2.applyColorMap(img, cv2.COLORMAP_JET))
+
+            if window.should_close():
+                break
+
+if __name__ == "__main__":
+    main()
+
+
