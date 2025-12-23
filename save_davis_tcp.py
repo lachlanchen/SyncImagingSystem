@@ -223,7 +223,14 @@ def main() -> None:
             save_events_npz(events_np, events_file)
             print(f"[EVENTS] wrote {len(events_np)} events to {events_file.name}")
         if aedat_writer:
-            aedat_writer.close()
+            for method_name in ("close", "finish", "flush", "release"):
+                close_fn = getattr(aedat_writer, method_name, None)
+                if close_fn:
+                    try:
+                        close_fn()
+                    except Exception:
+                        pass
+                    break
         if video_writer is not None:
             video_writer.release()
         print("Done.")
