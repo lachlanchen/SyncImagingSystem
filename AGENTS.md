@@ -10,7 +10,7 @@ This repository is a collection of Python scripts for camera capture and process
 ## Build, Test, and Development Commands
 There is no build system; run scripts directly with Python.
 - `python save_davis_tcp.py` — captures events and frames from DV Viewer (TCP ports `7777/7778`) into `davis_output/<timestamp>/`.
-- Dependencies are installed per your environment (e.g., `pip install dv` or `dv-processing`, plus `opencv-python` and `numpy`).
+- Dependencies are installed per your environment (e.g., `pip install dv-processing`, plus `opencv-python` and `numpy`).
 
 ## Coding Style & Naming Conventions
 - Python, 4-space indentation; prefer PEP 8 formatting.
@@ -29,3 +29,4 @@ There is no build system; run scripts directly with Python.
 ## Configuration & Data Hygiene
 - Do not commit large recordings; keep outputs in `davis_output/` and rely on `.gitignore`.
 - When documenting capture settings, include DV Viewer options (TCP host, ports, compression).
+- For AEDAT4 output compatible with DV Viewer, set `SAVE_AEDAT4 = True` in `save_davis_tcp.py` (requires `dv-processing`).

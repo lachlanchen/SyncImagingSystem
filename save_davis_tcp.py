@@ -49,9 +49,9 @@ def save_events_npz(events_np: np.ndarray, path: Path) -> None:
 
 
 def build_inputs():
-    if hasattr(dv, "io"):
-        event_input = _create_network_input(dv.io.NetworkEventInput, HOST, EVENTS_PORT)
-        frame_input = _create_network_input(dv.io.NetworkFrameInput, HOST, FRAMES_PORT)
+    if DV_MODULE == "dv_processing" and hasattr(dv, "io") and hasattr(dv.io, "NetworkReader"):
+        event_input = _create_network_input(dv.io.NetworkReader, HOST, EVENTS_PORT)
+        frame_input = _create_network_input(dv.io.NetworkReader, HOST, FRAMES_PORT)
         return "dv_processing", event_input, frame_input
     try:
         from dv.NetworkInput import NetworkInput
@@ -69,7 +69,7 @@ def build_inputs():
 
 def read_events(backend: str, event_input):
     if backend == "dv_processing":
-        events = event_input.read()
+        events = event_input.getNextEventBatch()
         if events is None or events.isEmpty():
             return None, None
         return events.numpy(), events
@@ -84,11 +84,63 @@ def read_events(backend: str, event_input):
 
 def read_frame(backend: str, frame_input):
     if backend == "dv_processing":
-        return frame_input.read()
+        return frame_input.getNextFrame()
     try:
         return next(frame_input)
     except StopIteration:
         return None
+
+
+def _get_frame_image(frame):
+    img = frame.image
+    if callable(img):
+        return img()
+    return img
+
+
+def _get_frame_timestamp(frame):
+    ts = frame.timestamp
+    if callable(ts):
+        return ts()
+    return ts
+
+
+def _safe_call(obj, method_name):
+    try:
+        return getattr(obj, method_name)()
+    except Exception:
+        return None
+
+
+def build_aedat_writer(backend: str, event_input, frame_input, run_dir: Path):
+    if not SAVE_AEDAT4:
+        return None
+    if backend != "dv_processing":
+        print("SAVE_AEDAT4 requires dv-processing; disabling AEDAT4 output.")
+        return None
+    if not hasattr(dv.io, "MonoCameraWriter"):
+        print("MonoCameraWriter not available; disabling AEDAT4 output.")
+        return None
+
+    camera_name = _safe_call(event_input, "getCameraName") or _safe_call(frame_input, "getCameraName") or "DV"
+    cfg = dv.io.MonoCameraWriter.Config(camera_name)
+
+    event_res = _safe_call(event_input, "getEventResolution")
+    frame_res = _safe_call(frame_input, "getFrameResolution")
+    if event_res is None and frame_res is not None:
+        event_res = frame_res
+    if frame_res is None and event_res is not None:
+        frame_res = event_res
+
+    if event_res is not None:
+        cfg.addEventStream(event_res)
+    if frame_res is not None:
+        cfg.addFrameStream(frame_res)
+
+    aedat_path = run_dir / "output.aedat4"
+    writer = dv.io.MonoCameraWriter(str(aedat_path), cfg)
+    print(f"Writing AEDAT4 to {aedat_path}")
+    return writer
 
 
 def main() -> None:
@@ -103,15 +155,7 @@ def main() -> None:
     print(f"Using dv backend: {backend} ({DV_MODULE})")
     print(f"Output directory: {run_dir}")
 
-    aedat_writer = None
-    save_aedat = SAVE_AEDAT4
-    if save_aedat and backend != "dv_processing":
-        print("SAVE_AEDAT4 requires dv-processing (dv.io); disabling AEDAT4 output.")
-        save_aedat = False
-    if save_aedat:
-        aedat_path = OUT_DIR / "output.aedat4"
-        aedat_writer = dv.io.AedatFileWriter(str(aedat_path))
-        print(f"Writing AEDAT4 to {aedat_path}")
+    aedat_writer = build_aedat_writer(backend, event_input, frame_input, run_dir)
 
     event_chunks = []
     frame_index = 0
@@ -137,8 +181,8 @@ def main() -> None:
                 if aedat_writer:
                     aedat_writer.writeFrame(frame)
                 if SAVE_FRAMES_VIDEO:
-                    img = frame.image
-                    ts = frame.timestamp
+                    img = _get_frame_image(frame)
+                    ts = _get_frame_timestamp(frame)
                     if img.ndim == 3 and img.shape[2] == 4:
                         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
                     if img.ndim == 3 and img.shape[2] == 1:
