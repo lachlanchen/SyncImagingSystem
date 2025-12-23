@@ -21,7 +21,7 @@ OUT_DIR = Path("davis_output")
 
 SAVE_EVENTS_NPZ = True
 SAVE_FRAMES_VIDEO = True
-SAVE_AEDAT4 = False
+SAVE_AEDAT4 = True
 
 CAPTURE_SECONDS = 3.0
 VIDEO_FPS = 30.0
