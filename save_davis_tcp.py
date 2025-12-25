@@ -28,6 +28,9 @@ SAVE_AEDAT4 = True
 CAPTURE_SECONDS = 3.0
 VIDEO_FPS = 30.0
 VIDEO_FOURCC = "MJPG"
+SHOW_EVENT_PREVIEW = True
+PREVIEW_FPS = 30.0
+PREVIEW_WINDOW_NAME = "Events"
 
 
 def _create_network_input(cls, host: str, port: int):
@@ -126,6 +129,37 @@ def _safe_call(obj, method_name):
         return None
 
 
+def build_event_visualizer(backend: str, event_input, frame_input):
+    if not SHOW_EVENT_PREVIEW:
+        return None
+    if DV_MODULE != "dv_processing":
+        print("Event preview requires dv-processing; disabling preview.")
+        return None
+    if backend not in ("dv_processing_network", "dv_processing_camera"):
+        print("Event preview requires dv-processing input; disabling preview.")
+        return None
+    resolution = _safe_call(event_input, "getEventResolution") or _safe_call(frame_input, "getFrameResolution")
+    if resolution is None:
+        print("Event preview disabled: resolution not available.")
+        return None
+    return dv.visualization.EventVisualizer(resolution)
+
+
+def update_event_preview(event_visualizer, events_store, last_preview_time):
+    if event_visualizer is None or events_store is None:
+        return last_preview_time, False
+    now = time.monotonic()
+    interval = 1.0 / PREVIEW_FPS if PREVIEW_FPS > 0 else 0.0
+    if (now - last_preview_time) < interval:
+        return last_preview_time, False
+    preview = event_visualizer.generateImage(events_store)
+    cv2.imshow(PREVIEW_WINDOW_NAME, preview)
+    key = cv2.waitKey(1) & 0xFF
+    if key in (27, ord("q")):
+        return now, True
+    return now, False
+
+
 def build_aedat_writer(backend: str, event_input, frame_input, run_dir: Path):
     if not SAVE_AEDAT4:
         return None
@@ -173,6 +207,8 @@ def main() -> None:
     print(f"Output directory: {run_dir}")
 
     aedat_writer = build_aedat_writer(backend, event_input, frame_input, run_dir)
+    event_visualizer = build_event_visualizer(backend, event_input, frame_input)
+    last_preview_time = 0.0
 
     event_chunks = []
     frame_index = 0
@@ -193,6 +229,11 @@ def main() -> None:
                         aedat_writer.writeEvents(packet)
                     if SAVE_EVENTS_NPZ:
                         event_chunks.append(events_np)
+                    last_preview_time, stop_requested = update_event_preview(
+                        event_visualizer, packet, last_preview_time
+                    )
+                    if stop_requested:
+                        break
                 elif isinstance(packet, dv.Frame):
                     frame = packet
                     got_data = True
@@ -235,6 +276,11 @@ def main() -> None:
                         aedat_writer.writeEvents(events_obj)
                     if SAVE_EVENTS_NPZ:
                         event_chunks.append(events_np)
+                    last_preview_time, stop_requested = update_event_preview(
+                        event_visualizer, events_obj, last_preview_time
+                    )
+                    if stop_requested:
+                        break
 
                 frame = read_frame(backend, frame_input)
                 if frame is not None:
@@ -294,6 +340,8 @@ def main() -> None:
                     break
         if video_writer is not None:
             video_writer.release()
+        if event_visualizer is not None:
+            cv2.destroyWindow(PREVIEW_WINDOW_NAME)
         print("Done.")
 
 
