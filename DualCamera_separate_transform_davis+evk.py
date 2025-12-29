@@ -1203,22 +1203,45 @@ class EventCameraController:
                 self._notify_status("DAVIS preview unavailable: no resolution")
                 self.visualization_running = False
                 return
+            if hasattr(resolution, "width") and hasattr(resolution, "height"):
+                width, height = resolution.width, resolution.height
+            else:
+                width, height = resolution
+
             visualizer = dv.visualization.EventVisualizer(resolution)
             self.visualization_running = True
             self._notify_status("DAVIS visualization started (press Q/Esc to close)")
+
+            cv2.namedWindow(self.preview_window_title, cv2.WINDOW_NORMAL)
+            try:
+                cv2.resizeWindow(self.preview_window_title, width, height)
+            except Exception:
+                pass
+
+            last_frame = np.zeros((height, width, 3), dtype=np.uint8)
+            cv2.imshow(self.preview_window_title, last_frame)
+            cv2.waitKey(1)
+            if WINDOWS_AVAILABLE:
+                set_window_always_on_top(self.preview_window_title, self.window_always_on_top)
 
             last_preview = 0.0
             while self.visualization_running and not self.should_exit:
                 try:
                     evs = self.event_queue.get(timeout=0.05)
                 except queue.Empty:
+                    cv2.imshow(self.preview_window_title, last_frame)
+                    if cv2.waitKey(1) & 0xFF in (27, ord("q")):
+                        break
                     continue
                 now = time.monotonic()
+                last_frame = visualizer.generateImage(evs)
                 if (now - last_preview) < (1.0 / 30.0):
+                    cv2.imshow(self.preview_window_title, last_frame)
+                    if cv2.waitKey(1) & 0xFF in (27, ord("q")):
+                        break
                     continue
                 last_preview = now
-                img = visualizer.generateImage(evs)
-                cv2.imshow(self.preview_window_title, img)
+                cv2.imshow(self.preview_window_title, last_frame)
                 if WINDOWS_AVAILABLE:
                     set_window_always_on_top(self.preview_window_title, self.window_always_on_top)
                 key = cv2.waitKey(1) & 0xFF
