@@ -10,6 +10,21 @@ import os
 import sys
 import platform
 from datetime import datetime
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+# Output defaults
+DEFAULT_OUTPUT_DIR = "recordings"
+
+
+def ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def sanitize_label(label: str) -> str:
+    return label.lower().replace(":", "_").replace(" ", "_")
 
 # Add the camera SDK paths (modify these paths according to your setup)
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -19,8 +34,6 @@ sys.path.append(os.path.join(BASE, "haikang_sdk", "Python", "MvImport"))
 # Import frame camera modules
 try:
     from ctypes import *
-    import numpy as np
-    import cv2
     from MvCameraControl_class import (
         MvCamera, MV_CC_DEVICE_INFO_LIST, MV_CC_DEVICE_INFO,
         MV_GIGE_DEVICE, MV_USB_DEVICE, MV_GENTL_CAMERALINK_DEVICE,
@@ -46,6 +59,15 @@ try:
 except ImportError as e:
     print(f"Event camera SDK not available: {e}")
     EVENT_CAMERA_AVAILABLE = False
+
+# Import DAVIS (dv-processing) modules
+try:
+    import dv_processing as dv
+    DAVIS_AVAILABLE = True
+except Exception as e:
+    dv = None
+    DAVIS_AVAILABLE = False
+    DAVIS_IMPORT_ERROR = str(e)
 
 # Platform-specific imports for always on top functionality
 if platform.system() == "Windows":
@@ -723,351 +745,509 @@ class FrameCameraController:
 
 
 class EventCameraController:
-    """Modified version of EventCameraRecorder for GUI integration - simplified connection like old working code"""
-    
+    """Unified EVK (Metavision) + DAVIS (dv-processing) event camera controller."""
+
     def __init__(self, status_callback=None, screen_info=None):
+        self.status_callback = status_callback
+        self.screen_info = screen_info or {}
+
+        self.vendor = None
+        self.device_label = None
         self.device = None
+
+        # EVK state
         self.mv_iterator = None
         self.height = None
         self.width = None
-        
+
+        # DAVIS state
+        self.event_resolution = None
+        self.frame_resolution = None
+        self.davis_writer = None
+        self.davis_events = []
+        self.davis_output_dir = None
+
         self.is_recording = False
         self.should_exit = False
         self.visualization_running = False
         self.capturing = False
-        
+
         self.record_lock = threading.Lock()
         self.event_queue = queue.Queue(maxsize=1000)
-        self.status_callback = status_callback
-        self.screen_info = screen_info or {}
-        
+
         self.current_log_path = None
-        
-        # Threads
+
         self.event_thread = None
         self.viz_thread = None
-        
-        # Window reference for proper cleanup and always on top - DEFAULT TO TRUE
+
         self.window = None
         self.window_always_on_top = True
-    
+        self.preview_window_title = "Event Camera Preview"
+        self.supports_biases = False
+
     def find_cameras(self):
-        """Find available event cameras - simplified approach"""
-        if not EVENT_CAMERA_AVAILABLE:
-            return []
-        
-        # Don't actually try to enumerate - just return a placeholder
-        # The actual connection test will happen in connect_camera()
-        return [(0, "Event Camera (Auto-detect)", "")]
-    
-    def connect_camera(self, device_path=""):
-        """Connect to event camera - using simple approach from old working code"""
-        if not EVENT_CAMERA_AVAILABLE:
-            self._notify_status("Event camera SDK not available")
-            return False
-        
-        try:
-            self._notify_status("Connecting to event camera...")
-            
-            # Simple cleanup first
-            self.stop_all()
-            
-            # Use the exact same approach as the old working code
-            self.device = initiate_device("")
-            
-            if self.device is None:
-                self._notify_status("Event camera connection failed: initiate_device returned None")
+        """Find available event cameras (DAVIS + EVK)."""
+        devices = []
+        if DAVIS_AVAILABLE:
+            try:
+                for desc in dv.io.camera.discover():
+                    label = f"DAVIS:{desc.serialNumber}"
+                    devices.append({"label": label, "vendor": "davis", "serial": desc.serialNumber})
+            except Exception as e:
+                self._notify_status(f"DAVIS discovery failed: {e}")
+        if EVENT_CAMERA_AVAILABLE:
+            devices.append({"label": "EVK:auto", "vendor": "evk", "serial": None})
+        return devices
+
+    def connect_camera(self, device_info=None):
+        """Connect to selected event camera."""
+        if device_info is None:
+            devices = self.find_cameras()
+            if not devices:
+                self._notify_status("No event cameras detected")
                 return False
-            
-            # Test the connection by creating iterator - exactly like old code
+            device_info = devices[0]
+
+        self.stop_all()
+
+        self.vendor = device_info.get("vendor")
+        self.device_label = device_info.get("label")
+        self.supports_biases = self.vendor == "evk"
+        self.preview_window_title = "Event Camera Preview" if self.vendor == "evk" else "DAVIS Preview"
+
+        if self.vendor == "davis":
+            return self._connect_davis(device_info.get("serial"))
+        return self._connect_evk()
+
+    def _connect_evk(self):
+        if not EVENT_CAMERA_AVAILABLE:
+            self._notify_status("EVK SDK not available")
+            return False
+        try:
+            self._notify_status("Connecting EVK...")
+            self.device = initiate_device("")
+            if self.device is None:
+                self._notify_status("EVK connection failed: initiate_device returned None")
+                return False
             self.mv_iterator = EventsIterator.from_device(device=self.device, delta_t=1000)
             self.height, self.width = self.mv_iterator.get_size()
-            
-            self._notify_status(f"Event camera connected successfully: {self.width}x{self.height}")
+            self._notify_status(f"EVK connected: {self.width}x{self.height}")
             return True
-            
         except Exception as e:
-            self._notify_status(f"Event camera connection failed: {e}")
-            # Clean up failed attempt
-            try:
-                if self.device:
-                    self.device = None
-                self.mv_iterator = None
-            except:
-                pass
+            self._notify_status(f"EVK connection failed: {e}")
+            self.device = None
+            self.mv_iterator = None
             return False
-    
+
+    def _connect_davis(self, serial):
+        if not DAVIS_AVAILABLE:
+            self._notify_status(f"DAVIS SDK not available: {DAVIS_IMPORT_ERROR}")
+            return False
+        for attempt in range(3):
+            try:
+                self._notify_status("Connecting DAVIS...")
+                self.device = dv.io.camera.open(serial) if serial else dv.io.camera.open()
+                self.event_resolution = self.device.getEventResolution()
+                self.frame_resolution = self.device.getFrameResolution()
+                if self.event_resolution:
+                    self.width, self.height = self.event_resolution
+                elif self.frame_resolution:
+                    self.width, self.height = self.frame_resolution
+                self._notify_status(f"DAVIS connected: {self.width}x{self.height}")
+                return True
+            except Exception as e:
+                msg = str(e).lower()
+                if "time synchronization timeout" in msg and attempt < 2:
+                    self._notify_status("DAVIS sync timeout, retrying...")
+                    time.sleep(0.5)
+                    continue
+                self._notify_status(f"DAVIS connection failed: {e}")
+                break
+        self.device = None
+        return False
+
     def disconnect_camera(self):
-        """Disconnect camera gracefully"""
+        """Disconnect camera gracefully."""
         self.stop_all()
         self.device = None
         self.mv_iterator = None
         self._notify_status("Event camera disconnected")
-    
+
     def start_capture(self):
-        """Start capturing events"""
+        """Start capturing events."""
         if not self.device or self.capturing:
             return self.capturing
-        
+
         self.should_exit = False
         self.capturing = True
-        self.event_thread = threading.Thread(target=self._event_processing_thread, daemon=True)
+        if self.vendor == "davis":
+            self.event_thread = threading.Thread(target=self._davis_processing_thread, daemon=True)
+        else:
+            self.event_thread = threading.Thread(target=self._event_processing_thread, daemon=True)
         self.event_thread.start()
         self._notify_status("Event capture started")
         return True
-    
+
     def stop_capture(self):
-        """Stop capturing events"""
+        """Stop capturing events."""
         if self.capturing:
             self.should_exit = True
             self.capturing = False
             if self.event_thread:
                 self.event_thread.join(timeout=2.0)
             self._notify_status("Event capture stopped")
-    
+
     def start_recording(self, output_dir="", filename_prefix=""):
-        """Start recording events"""
-        # Auto-start capture if needed
+        """Start recording events."""
         if not self.capturing:
             if not self.start_capture():
                 return False
-        
+
         with self.record_lock:
             if self.is_recording:
                 return False
-            
+
+            if self.vendor == "davis":
+                output_dir = output_dir or ""
+                if output_dir:
+                    os.makedirs(output_dir, exist_ok=True)
+                self.davis_output_dir = output_dir
+                aedat_path = os.path.join(output_dir, "output.aedat4") if output_dir else "output.aedat4"
+
+                camera_name = self.device.getCameraName() if self.device else "DAVIS"
+                cfg = dv.io.MonoCameraWriter.Config(camera_name)
+                event_res = self.event_resolution or self.frame_resolution
+                if event_res:
+                    cfg.addEventStream(event_res)
+                if self.frame_resolution:
+                    cfg.addFrameStream(self.frame_resolution)
+
+                try:
+                    self.davis_writer = dv.io.MonoCameraWriter(str(aedat_path), cfg)
+                except Exception as e:
+                    self._notify_status(f"DAVIS AEDAT writer error: {e}")
+                    return False
+
+                self.davis_events = []
+                self.is_recording = True
+                self._notify_status(f"DAVIS recording started: {aedat_path}")
+                return True
+
             if self.device and self.device.get_i_events_stream():
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 if filename_prefix:
                     self.current_log_path = f"{filename_prefix}_{timestamp}.raw"
                 else:
                     self.current_log_path = f"recording_{timestamp}.raw"
-                
+
                 if output_dir:
+                    os.makedirs(output_dir, exist_ok=True)
                     self.current_log_path = os.path.join(output_dir, self.current_log_path)
-                
+
                 self.device.get_i_events_stream().log_raw_data(self.current_log_path)
                 self.is_recording = True
                 self._notify_status(f"Recording started: {self.current_log_path}")
                 return True
         return False
-    
+
     def stop_recording(self):
-        """Stop recording events"""
+        """Stop recording events."""
         with self.record_lock:
             if not self.is_recording:
                 return False
-            
+
+            if self.vendor == "davis":
+                self.is_recording = False
+                if self.davis_writer:
+                    for method_name in ("close", "finish", "flush", "release"):
+                        close_fn = getattr(self.davis_writer, method_name, None)
+                        if close_fn:
+                            try:
+                                close_fn()
+                            except Exception:
+                                pass
+                            break
+                self.davis_writer = None
+                if self.davis_events and self.davis_output_dir is not None:
+                    events_np = np.concatenate(self.davis_events)
+                    np.savez_compressed(
+                        os.path.join(self.davis_output_dir, "events.npz"),
+                        t=events_np["timestamp"],
+                        x=events_np["x"],
+                        y=events_np["y"],
+                        p=events_np["polarity"],
+                    )
+                self._notify_status("DAVIS recording stopped")
+                return True
+
             try:
                 self.device.get_i_events_stream().stop_log_raw_data()
-            except:
+            except Exception:
                 pass
             self.is_recording = False
             self._notify_status(f"Recording stopped: {self.current_log_path}")
             return True
-    
+
     def start_visualization(self):
-        """Start event visualization with auto-start capture"""
-        # Auto-start capture if needed
+        """Start event visualization with auto-start capture."""
         if not self.capturing:
             if not self.start_capture():
                 return False
-        
+
         if not self.device or self.visualization_running:
             return False
-        
-        self.viz_thread = threading.Thread(target=self._visualization_thread, daemon=True)
+
+        if self.vendor == "davis":
+            self.viz_thread = threading.Thread(target=self._davis_visualization_thread, daemon=True)
+        else:
+            self.viz_thread = threading.Thread(target=self._visualization_thread, daemon=True)
         self.viz_thread.start()
         return True
-    
+
     def stop_visualization(self):
-        """Stop visualization"""
+        """Stop visualization."""
         if self.visualization_running:
             self.visualization_running = False
-            
-            # Force close window
             if self.window:
                 try:
                     self.window.set_close_flag()
-                except:
+                except Exception:
                     pass
                 self.window = None
-            
+            if self.vendor == "davis":
+                try:
+                    cv2.destroyWindow(self.preview_window_title)
+                except Exception:
+                    pass
             if self.viz_thread:
                 self.viz_thread.join(timeout=3.0)
-    
+
     def toggle_visualization_always_on_top(self):
-        """Toggle always on top for visualization window"""
+        """Toggle always on top for visualization window."""
         self.window_always_on_top = not self.window_always_on_top
         if WINDOWS_AVAILABLE:
-            set_window_always_on_top("Event Camera Preview", self.window_always_on_top)
+            set_window_always_on_top(self.preview_window_title, self.window_always_on_top)
         self._notify_status(f"Event preview always on top: {'ON' if self.window_always_on_top else 'OFF'}")
-    
+
     def stop_all(self):
-        """Stop all operations"""
+        """Stop all operations."""
         if self.is_recording:
             self.stop_recording()
         self.stop_visualization()
         self.stop_capture()
-    
+
     def get_bias_values(self):
-        """Get current bias values"""
-        if not self.device:
+        """Get current bias values (EVK only)."""
+        if self.vendor != "evk" or not self.device:
             return {}
-        
         bias_interface = self.device.get_i_ll_biases()
         if bias_interface is None:
             return {}
-        
         try:
             return bias_interface.get_all_biases()
-        except:
+        except Exception:
             return {}
-    
+
     def set_bias_value(self, bias_name, value):
-        """Set a bias value"""
-        if not self.device:
+        """Set a bias value (EVK only)."""
+        if self.vendor != "evk" or not self.device:
             return False
-        
         bias_interface = self.device.get_i_ll_biases()
         if bias_interface is None:
             return False
-        
         try:
             bias_interface.set(bias_name, int(value))
             return True
-        except:
+        except Exception:
             return False
-    
+
+    def label_safe(self):
+        label = self.device_label or (self.vendor or "event")
+        return sanitize_label(label)
+
     def _event_processing_thread(self):
-        """Thread for reading events from camera - exactly like old working code"""
+        """EVK: thread for reading events from camera."""
         try:
             for evs in self.mv_iterator:
                 if self.should_exit:
                     break
-                
                 try:
                     self.event_queue.put(evs, block=False)
                 except queue.Full:
                     pass
-                
                 if self.should_exit:
                     break
         except Exception as e:
-            self._notify_status(f"Event processing error: {e}")
+            self._notify_status(f"EVK processing error: {e}")
         finally:
             self.capturing = False
-    
+
+    def _davis_processing_thread(self):
+        """DAVIS: thread for reading events/frames."""
+        try:
+            while not self.should_exit:
+                packet = self.device.readNext()
+                if isinstance(packet, dv.EventStore):
+                    if self.is_recording and self.davis_writer:
+                        self.davis_writer.writeEvents(packet)
+                        self.davis_events.append(packet.numpy())
+                    if self.visualization_running:
+                        try:
+                            self.event_queue.put(packet, block=False)
+                        except queue.Full:
+                            pass
+                elif isinstance(packet, dv.Frame):
+                    if self.is_recording and self.davis_writer:
+                        self.davis_writer.writeFrame(packet)
+                elif isinstance(packet, dv.io.DataReadHandler.OutputFlag):
+                    if packet == dv.io.DataReadHandler.OutputFlag.END_OF_FILE:
+                        break
+                else:
+                    time.sleep(0.001)
+        except Exception as e:
+            self._notify_status(f"DAVIS processing error: {e}")
+        finally:
+            self.capturing = False
+
     def _visualization_thread(self):
-        """Thread for event visualization - like old working code but with always on top"""
+        """EVK visualization thread."""
         try:
             event_frame_gen = PeriodicFrameGenerationAlgorithm(
-                sensor_width=self.width, sensor_height=self.height, 
+                sensor_width=self.width, sensor_height=self.height,
                 fps=25, palette=ColorPalette.Dark
             )
-            
-            # Calculate window dimensions for BOTTOM half of right side
+
             if self.screen_info:
                 window_width = min(self.width, self.screen_info.get('right_half_width', self.width))
-                # Calculate height to fit in bottom portion
                 available_height = self.screen_info.get('height', 720) - self.screen_info.get('top_half_height', 360)
-                window_height = min(self.height, available_height - 50)  # Leave space for title bar
+                window_height = min(self.height, available_height - 50)
             else:
                 window_width = self.width
                 window_height = self.height
-            
-            with MTWindow(title="Event Camera Preview", width=window_width, height=window_height,
+
+            with MTWindow(title=self.preview_window_title, width=window_width, height=window_height,
                          mode=BaseWindow.RenderMode.BGR) as window:
-                
+
                 self.window = window
-                
-                # Position window on BOTTOM half of right side using Windows API
+
                 if WINDOWS_AVAILABLE and self.screen_info:
                     def position_window():
-                        time.sleep(0.3)  # Give window time to be created
+                        time.sleep(0.3)
                         try:
-                            hwnd = win32gui.FindWindow(None, "Event Camera Preview")
+                            hwnd = win32gui.FindWindow(None, self.preview_window_title)
                             if hwnd:
                                 x = self.screen_info.get('right_half_x', 700)
-                                # Position right after the top window with minimal gap
                                 top_window_height = self.screen_info.get('top_half_height', 360)
-                                y = top_window_height - 20  # Small gap between windows
+                                y = top_window_height - 20
                                 width = self.screen_info.get('right_half_width', 640)
-                                # Calculate height to fit remaining space
-                                remaining_height = self.screen_info.get('height', 720) - y - 50  # Leave space at bottom
+                                remaining_height = self.screen_info.get('height', 720) - y - 50
                                 height = min(window_height, remaining_height)
-                                
-                                win32gui.SetWindowPos(hwnd, 0, x, y, width, height, 
-                                                    win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
+                                win32gui.SetWindowPos(hwnd, 0, x, y, width, height,
+                                                      win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
                         except Exception as e:
                             print(f"Could not position event window: {e}")
-                    
-                    # Position window in a separate thread to avoid blocking
-                    import threading
+
                     threading.Thread(target=position_window, daemon=True).start()
-                
+
                 def keyboard_cb(key, scancode, action, mods):
                     if action != UIAction.RELEASE:
                         return
                     if key == UIKeyEvent.KEY_ESCAPE or key == UIKeyEvent.KEY_Q:
                         window.set_close_flag()
                     elif key == UIKeyEvent.KEY_T:
-                        # Toggle always on top with 'T' key
                         self.toggle_visualization_always_on_top()
-                
+
                 window.set_keyboard_callback(keyboard_cb)
-                
+
                 def on_cd_frame_cb(ts, cd_frame):
-                    # Add status overlay to the frame
                     overlay_frame = cd_frame.copy()
                     status_text = f"Always on top: {'ON' if self.window_always_on_top else 'OFF'} (T to toggle)"
-                    cv2.putText(overlay_frame, status_text, (10, 30), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    cv2.putText(overlay_frame, status_text, (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                     window.show_async(overlay_frame)
-                
+
                 event_frame_gen.set_output_callback(on_cd_frame_cb)
-                
+
                 self.visualization_running = True
                 self._notify_status("Event visualization started - Press 'T' to toggle always on top")
-                
-                # Set initial always on top state - ALWAYS SET BY DEFAULT
+
                 if WINDOWS_AVAILABLE:
-                    time.sleep(0.4)  # Give window time to be created and positioned
-                    set_window_always_on_top("Event Camera Preview", self.window_always_on_top)
-                
-                # Simple event loop like old working code
+                    time.sleep(0.4)
+                    set_window_always_on_top(self.preview_window_title, self.window_always_on_top)
+
                 while not self.should_exit and self.visualization_running:
                     if window.should_close():
                         break
-                    
+
                     try:
                         evs = self.event_queue.get(timeout=0.01)
                         EventLoop.poll_and_dispatch()
                         event_frame_gen.process_events(evs)
                     except queue.Empty:
                         EventLoop.poll_and_dispatch()
-                    except Exception as e:
+                    except Exception:
                         break
-            
+
         except Exception as e:
             self._notify_status(f"Visualization error: {e}")
         finally:
             self.visualization_running = False
             self.window = None
             self._notify_status("Event visualization stopped")
-    
+
+    def _davis_visualization_thread(self):
+        """DAVIS visualization thread."""
+        try:
+            resolution = self.event_resolution or self.frame_resolution
+            if resolution is None:
+                self._notify_status("DAVIS preview unavailable: no resolution")
+                self.visualization_running = False
+                return
+            visualizer = dv.visualization.EventVisualizer(resolution)
+            self.visualization_running = True
+            self._notify_status("DAVIS visualization started (press Q/Esc to close)")
+
+            last_preview = 0.0
+            while self.visualization_running and not self.should_exit:
+                try:
+                    evs = self.event_queue.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                now = time.monotonic()
+                if (now - last_preview) < (1.0 / 30.0):
+                    continue
+                last_preview = now
+                img = visualizer.generateImage(evs)
+                cv2.imshow(self.preview_window_title, img)
+                if WINDOWS_AVAILABLE:
+                    set_window_always_on_top(self.preview_window_title, self.window_always_on_top)
+                key = cv2.waitKey(1) & 0xFF
+                if key in (27, ord("q")):
+                    break
+        except Exception as e:
+            self._notify_status(f"DAVIS visualization error: {e}")
+        finally:
+            self.visualization_running = False
+            try:
+                cv2.destroyWindow(self.preview_window_title)
+            except Exception:
+                pass
+            self._notify_status("DAVIS visualization stopped")
+
     def _notify_status(self, message):
-        """Notify status callback"""
+        """Notify status callback."""
         if self.status_callback:
-            self.status_callback(f"Event: {message}")
-    
+            prefix = "DAVIS" if self.vendor == "davis" else "EVK"
+            self.status_callback(f"{prefix}: {message}")
+
     def get_status(self):
-        """Get current status"""
+        """Get current status."""
         return {
             'connected': self.device is not None,
             'capturing': self.capturing,
             'recording': self.is_recording,
-            'visualizing': self.visualization_running
+            'visualizing': self.visualization_running,
+            'vendor': self.vendor
         }
 
 
@@ -1116,6 +1296,8 @@ class DualCameraGUI:
         # Filename prefix variable
         self.filename_prefix_var = tk.StringVar()
         self.filename_prefix_var.set("sync_recording")
+        self.output_dir_var = tk.StringVar(value=DEFAULT_OUTPUT_DIR)
+        self.frame_camera_label = None
         
         # Unified control flags
         self.unified_preview_active = False
@@ -1148,10 +1330,15 @@ class DualCameraGUI:
         # Filename prefix section
         prefix_section = ttk.LabelFrame(scrollable_frame, text="Recording Settings")
         prefix_section.pack(fill=tk.X, padx=5, pady=5)
-        
-        ttk.Label(prefix_section, text="Filename Prefix:").grid(row=0, column=0, padx=5, pady=5)
+
+        ttk.Label(prefix_section, text="Output Folder:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        output_entry = ttk.Entry(prefix_section, textvariable=self.output_dir_var, width=40)
+        output_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        ttk.Button(prefix_section, text="Browse", command=self.select_output_dir).grid(row=0, column=2, padx=5, pady=5)
+
+        ttk.Label(prefix_section, text="Filename Prefix:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         prefix_entry = ttk.Entry(prefix_section, textvariable=self.filename_prefix_var, width=30)
-        prefix_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        prefix_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
         prefix_section.columnconfigure(1, weight=1)
         
         # Frame camera section
@@ -1274,9 +1461,10 @@ class DualCameraGUI:
         self.event_camera_var = tk.StringVar()
         self.event_camera_combo = ttk.Combobox(conn_frame, textvariable=self.event_camera_var, state="readonly")
         self.event_camera_combo.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        
+
+        ttk.Button(conn_frame, text="Scan", command=self.scan_cameras).grid(row=0, column=2, padx=5, pady=5)
         self.event_connect_btn = ttk.Button(conn_frame, text="Connect", command=self.connect_event_camera)
-        self.event_connect_btn.grid(row=0, column=2, padx=5, pady=5)
+        self.event_connect_btn.grid(row=0, column=3, padx=5, pady=5)
         
         conn_frame.columnconfigure(1, weight=1)
         
@@ -1322,10 +1510,11 @@ class DualCameraGUI:
             self.bias_vars[bias_name] = var
             self.bias_scales[bias_name] = scale
             self.bias_text_vars[bias_name] = text_var
-            self.bias_entries[bias_name] = entry
+        self.bias_entries[bias_name] = entry
         
         bias_frame.columnconfigure(1, weight=1)
         bias_frame.columnconfigure(5, weight=1)
+        self._set_bias_controls_enabled(False)
     
     def create_unified_controls_section(self, parent):
         """Create unified controls section"""
@@ -1371,6 +1560,32 @@ class DualCameraGUI:
         
         self.status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         status_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def select_output_dir(self):
+        """Select output directory for recordings."""
+        folder = filedialog.askdirectory()
+        if folder:
+            self.output_dir_var.set(folder)
+
+    def _build_run_dir(self):
+        base_dir = self.output_dir_var.get().strip() or DEFAULT_OUTPUT_DIR
+        prefix = self.filename_prefix_var.get().strip()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"{prefix}_{timestamp}" if prefix else timestamp
+        run_dir = Path(base_dir) / name
+        ensure_dir(run_dir)
+        return run_dir, timestamp, prefix
+
+    def _frame_subdir_name(self):
+        label = self.frame_camera_label or "frame"
+        return sanitize_label(label)
+
+    def _set_bias_controls_enabled(self, enabled):
+        state = ["!disabled"] if enabled else ["disabled"]
+        for scale in self.bias_scales.values():
+            scale.state(state)
+        for entry in self.bias_entries.values():
+            entry.state(state)
     
     def scan_cameras(self):
         """Scan for available cameras"""
@@ -1383,10 +1598,12 @@ class DualCameraGUI:
         
         # Event cameras - simplified approach
         self.event_cameras_list = self.event_camera.find_cameras()
-        event_names = [f"{idx}: {name}" for idx, name, _ in self.event_cameras_list]
+        event_names = [device["label"] for device in self.event_cameras_list]
         self.event_camera_combo['values'] = event_names
         if event_names:
             self.event_camera_combo.current(0)
+        else:
+            self.event_camera_var.set("")
         
         # Update status
         frame_count = len(self.frame_cameras_list)
@@ -1407,6 +1624,7 @@ class DualCameraGUI:
         idx, name, device_info = self.frame_cameras_list[selected_idx]
         
         if self.frame_camera.connect_camera(device_info):
+            self.frame_camera_label = name
             self.frame_connect_btn.config(text="Disconnect", command=self.disconnect_frame_camera)
             self.update_frame_parameters()
         else:
@@ -1415,14 +1633,26 @@ class DualCameraGUI:
     def disconnect_frame_camera(self):
         """Disconnect frame camera"""
         self.frame_camera.disconnect_camera()
+        self.frame_camera_label = None
         self.frame_connect_btn.config(text="Connect", command=self.connect_frame_camera)
         self.reset_frame_button_states()
     
     def connect_event_camera(self):
         """Connect to event camera - simplified approach"""
-        if self.event_camera.connect_camera():
+        if not self.event_cameras_list:
+            messagebox.showerror("Error", "No event cameras found!")
+            return
+
+        selected_idx = self.event_camera_combo.current()
+        if selected_idx < 0:
+            messagebox.showerror("Error", "Please select an event camera!")
+            return
+
+        device_info = self.event_cameras_list[selected_idx]
+        if self.event_camera.connect_camera(device_info):
             self.event_connect_btn.config(text="Disconnect", command=self.disconnect_event_camera)
             self.update_event_parameters()
+            self._set_bias_controls_enabled(self.event_camera.supports_biases)
         else:
             messagebox.showerror("Error", "Failed to connect to event camera!")
     
@@ -1431,6 +1661,7 @@ class DualCameraGUI:
         self.event_camera.disconnect_camera()
         self.event_connect_btn.config(text="Connect", command=self.connect_event_camera)
         self.reset_event_button_states()
+        self._set_bias_controls_enabled(False)
     
     def reset_frame_button_states(self):
         """Reset frame camera button states"""
@@ -1462,6 +1693,13 @@ class DualCameraGUI:
     
     def update_event_parameters(self):
         """Update event camera bias values"""
+        if not self.event_camera.supports_biases:
+            self._set_bias_controls_enabled(False)
+            for bias_name in self.bias_text_vars:
+                self.bias_text_vars[bias_name].set("")
+            return
+
+        self._set_bias_controls_enabled(True)
         bias_values = self.event_camera.get_bias_values()
         for bias_name, var in self.bias_vars.items():
             if bias_name in bias_values:
@@ -1493,11 +1731,15 @@ class DualCameraGUI:
     def toggle_frame_recording(self):
         """Toggle frame recording with auto-start grabbing"""
         if not self.frame_camera.is_recording:
-            prefix = self.filename_prefix_var.get()
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{prefix}_frame_{timestamp}.avi" if prefix else None
-            
-            if self.frame_camera.start_recording(filename):
+            if self.frame_camera.cam is None:
+                self.update_status("Frame camera not connected")
+                return
+            run_dir, timestamp, prefix = self._build_run_dir()
+            frame_dir = run_dir / self._frame_subdir_name()
+            ensure_dir(frame_dir)
+            filename = f"{prefix}_frame_{timestamp}.avi" if prefix else f"frame_{timestamp}.avi"
+
+            if self.frame_camera.start_recording(str(frame_dir / filename)):
                 self.frame_record_btn.config(text="Stop Recording")
                 # Update grabbing button if auto-started
                 if self.frame_camera.is_grabbing:
@@ -1545,8 +1787,13 @@ class DualCameraGUI:
     def toggle_event_recording(self):
         """Toggle event recording with auto-start capture"""
         if not self.event_camera.is_recording:
-            prefix = self.filename_prefix_var.get()
-            if self.event_camera.start_recording(filename_prefix=prefix):
+            if self.event_camera.device is None:
+                self.update_status("Event camera not connected")
+                return
+            run_dir, _timestamp, prefix = self._build_run_dir()
+            event_dir = run_dir / self.event_camera.label_safe()
+            ensure_dir(event_dir)
+            if self.event_camera.start_recording(output_dir=str(event_dir), filename_prefix=prefix):
                 self.event_record_btn.config(text="Stop Recording")
                 # Update capture button if auto-started
                 if self.event_camera.capturing:
@@ -1604,13 +1851,19 @@ class DualCameraGUI:
             # Start unified recording
             frame_started = False
             event_started = False
-            prefix = self.filename_prefix_var.get()
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            if self.frame_camera.cam is None and self.event_camera.device is None:
+                self.update_status("No cameras available for unified recording")
+                return
+
+            run_dir, timestamp, prefix = self._build_run_dir()
             
             # Start frame camera recording if connected
             if self.frame_camera.cam is not None:
-                filename = f"{prefix}_frame_{timestamp}.avi" if prefix else None
-                frame_started = self.frame_camera.start_recording(filename)
+                frame_dir = run_dir / self._frame_subdir_name()
+                ensure_dir(frame_dir)
+                filename = f"{prefix}_frame_{timestamp}.avi" if prefix else f"frame_{timestamp}.avi"
+                frame_started = self.frame_camera.start_recording(str(frame_dir / filename))
                 if frame_started:
                     self.frame_record_btn.config(text="Stop Recording")
                     if self.frame_camera.is_grabbing:
@@ -1618,7 +1871,12 @@ class DualCameraGUI:
             
             # Start event camera recording if connected
             if self.event_camera.device is not None:
-                event_started = self.event_camera.start_recording(filename_prefix=f"{prefix}_event" if prefix else "")
+                event_dir = run_dir / self.event_camera.label_safe()
+                ensure_dir(event_dir)
+                event_started = self.event_camera.start_recording(
+                    output_dir=str(event_dir),
+                    filename_prefix=prefix,
+                )
                 if event_started:
                     self.event_record_btn.config(text="Stop Recording")
                     if self.event_camera.capturing:
