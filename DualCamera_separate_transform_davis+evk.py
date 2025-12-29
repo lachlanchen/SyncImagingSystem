@@ -1016,8 +1016,8 @@ class EventCameraController:
                 self.window = None
             if self.vendor == "davis":
                 try:
-                    cv2.destroyWindow(self.preview_window_title)
-                except Exception:
+                    self.event_queue.put_nowait(None)
+                except queue.Full:
                     pass
             if self.viz_thread:
                 self.viz_thread.join(timeout=3.0)
@@ -1233,6 +1233,8 @@ class EventCameraController:
                     if cv2.waitKey(1) & 0xFF in (27, ord("q")):
                         break
                     continue
+                if evs is None:
+                    break
                 now = time.monotonic()
                 last_frame = visualizer.generateImage(evs)
                 if (now - last_preview) < (1.0 / 30.0):
