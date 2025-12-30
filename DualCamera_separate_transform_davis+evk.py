@@ -71,6 +71,22 @@ def get_preview_geometry(screen_info, position):
     h = max(MIN_PREVIEW_HEIGHT, int(h))
     return int(x), int(y), int(w), int(h)
 
+
+def position_window_win32(window_title, x, y, width, height, attempts=10, delay=0.03):
+    if not WINDOWS_AVAILABLE:
+        return False
+    for _ in range(attempts):
+        hwnd = win32gui.FindWindow(None, window_title)
+        if hwnd:
+            try:
+                win32gui.SetWindowPos(hwnd, 0, x, y, width, height,
+                                      win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
+                return True
+            except Exception:
+                pass
+        time.sleep(delay)
+    return False
+
 # Add the camera SDK paths (modify these paths according to your setup)
 BASE = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(BASE, "haikang_sdk", "Python"))
@@ -683,14 +699,7 @@ class FrameCameraController:
             window_x, window_y, window_width, window_height = geometry
             cv2.resizeWindow(window_name, window_width, window_height)
             cv2.moveWindow(window_name, window_x, window_y)
-            if WINDOWS_AVAILABLE:
-                try:
-                    hwnd = win32gui.FindWindow(None, window_name)
-                    if hwnd:
-                        win32gui.SetWindowPos(hwnd, 0, window_x, window_y, window_width, window_height,
-                                              win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
-                except Exception as e:
-                    print(f"Could not position frame preview window: {e}")
+            position_window_win32(window_name, window_x, window_y, window_width, window_height)
         
         # Set initial always on top state - ALWAYS SET BY DEFAULT
         if WINDOWS_AVAILABLE:
@@ -1178,18 +1187,8 @@ class EventCameraController:
 
                 self.window = window
 
-                if WINDOWS_AVAILABLE and geometry:
-                    def position_window():
-                        time.sleep(0.3)
-                        try:
-                            hwnd = win32gui.FindWindow(None, self.preview_window_title)
-                            if hwnd:
-                                win32gui.SetWindowPos(hwnd, 0, window_x, window_y, window_width, window_height,
-                                                      win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
-                        except Exception as e:
-                            print(f"Could not position event window: {e}")
-
-                    threading.Thread(target=position_window, daemon=True).start()
+                if geometry:
+                    position_window_win32(self.preview_window_title, window_x, window_y, window_width, window_height)
 
                 def keyboard_cb(key, scancode, action, mods):
                     if action != UIAction.RELEASE:
@@ -1269,6 +1268,8 @@ class EventCameraController:
                 cv2.resizeWindow(self.preview_window_title, display_width, display_height)
             except Exception:
                 pass
+            if geometry:
+                cv2.moveWindow(self.preview_window_title, window_x, window_y)
 
             last_frame = np.zeros((height, width, 3), dtype=np.uint8)
             render = last_frame
@@ -1279,15 +1280,7 @@ class EventCameraController:
             if WINDOWS_AVAILABLE:
                 set_window_always_on_top(self.preview_window_title, self.window_always_on_top)
                 if geometry:
-                    try:
-                        hwnd = win32gui.FindWindow(None, self.preview_window_title)
-                        if hwnd:
-                            win32gui.SetWindowPos(hwnd, 0, window_x, window_y, display_width, display_height,
-                                                  win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
-                    except Exception as e:
-                        print(f"Could not position DAVIS preview window: {e}")
-            elif geometry:
-                cv2.moveWindow(self.preview_window_title, window_x, window_y)
+                    position_window_win32(self.preview_window_title, window_x, window_y, display_width, display_height)
 
             last_preview = 0.0
             while self.visualization_running and not self.should_exit:
