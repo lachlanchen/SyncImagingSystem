@@ -17,6 +17,7 @@ There is no build system; run scripts directly with Python.
 - Stop DAVIS preview via the GUI button (or `q`/`Esc` in the OpenCV window); the preview thread owns the OpenCV window lifecycle.
 - The main GUI uses mouse-wheel scrolling; DAVIS preview windows are scaled and positioned to the right/bottom half on Windows.
 - Frame previews target the right/top half; event previews target the right/bottom half, using shared screen geometry.
+- Preview windows are inset from the top-right edge to avoid blocking the main window controls.
 - Set `SHOW_EVENT_PREVIEW = True` in `save_davis_tcp.py` to open a live event preview window (press `q` or `Esc` to quit).
 - Dependencies are installed per your environment (e.g., `pip install dv-processing`, plus `opencv-python` and `numpy`).
 

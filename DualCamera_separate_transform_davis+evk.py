@@ -20,6 +20,8 @@ DEFAULT_OUTPUT_DIR = "recordings"
 PREVIEW_MARGIN = 8
 PREVIEW_GAP = 10
 PREVIEW_TASKBAR_PAD = 80
+PREVIEW_TOP_OFFSET = 36
+PREVIEW_RIGHT_OFFSET = 32
 MIN_PREVIEW_WIDTH = 240
 MIN_PREVIEW_HEIGHT = 180
 
@@ -48,16 +50,22 @@ def get_preview_geometry(screen_info, position):
 
     margin = PREVIEW_MARGIN
     gap = PREVIEW_GAP
+    top_offset = PREVIEW_TOP_OFFSET
+    right_offset = PREVIEW_RIGHT_OFFSET
+    available_height = usable_height - top_offset - (margin * 2) - gap
+    if available_height < MIN_PREVIEW_HEIGHT * 2:
+        available_height = MIN_PREVIEW_HEIGHT * 2
+    top_h = available_height // 2
     if position == "top":
         x = right_x + margin
-        y = margin
-        w = right_w - (margin * 2)
-        h = top_h - gap - margin
+        y = top_offset + margin
+        w = right_w - (margin * 2) - right_offset
+        h = top_h
     else:
         x = right_x + margin
-        y = top_h + gap
-        w = right_w - (margin * 2)
-        h = usable_height - top_h - gap - margin
+        y = top_offset + margin + top_h + gap
+        w = right_w - (margin * 2) - right_offset
+        h = top_h
 
     w = max(MIN_PREVIEW_WIDTH, int(w))
     h = max(MIN_PREVIEW_HEIGHT, int(h))
