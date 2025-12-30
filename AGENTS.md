@@ -15,6 +15,7 @@ There is no build system; run scripts directly with Python.
 - `python unified_event_gui.py` — event-only GUI for EVK (Metavision) and DAVIS (dv-processing) with auto-detect and recording to a run subfolder.
 - DAVIS previews are OpenCV windows; if no events arrive, the preview still opens with a blank frame and updates as events stream in.
 - Stop DAVIS preview via the GUI button (or `q`/`Esc` in the OpenCV window); the preview thread owns the OpenCV window lifecycle.
+- The main GUI uses mouse-wheel scrolling; DAVIS preview windows are scaled and positioned to the right/bottom half on Windows.
 - Set `SHOW_EVENT_PREVIEW = True` in `save_davis_tcp.py` to open a live event preview window (press `q` or `Esc` to quit).
 - Dependencies are installed per your environment (e.g., `pip install dv-processing`, plus `opencv-python` and `numpy`).
 

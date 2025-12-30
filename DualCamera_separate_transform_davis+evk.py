@@ -1213,23 +1213,50 @@ class EventCameraController:
             self._notify_status("DAVIS visualization started (press Q/Esc to close)")
 
             cv2.namedWindow(self.preview_window_title, cv2.WINDOW_NORMAL)
+            display_width, display_height = width, height
+            if self.screen_info:
+                target_width = self.screen_info.get("right_half_width", width)
+                target_height = self.screen_info.get("height", height) - self.screen_info.get("top_half_height", height // 2) - 50
+                target_height = max(100, target_height)
+                scale = min(target_width / width, target_height / height)
+                if scale > 0:
+                    display_width = max(100, int(width * scale))
+                    display_height = max(100, int(height * scale))
+
             try:
-                cv2.resizeWindow(self.preview_window_title, width, height)
+                cv2.resizeWindow(self.preview_window_title, display_width, display_height)
             except Exception:
                 pass
 
             last_frame = np.zeros((height, width, 3), dtype=np.uint8)
-            cv2.imshow(self.preview_window_title, last_frame)
+            render = last_frame
+            if (display_width, display_height) != (width, height):
+                render = cv2.resize(last_frame, (display_width, display_height), interpolation=cv2.INTER_NEAREST)
+            cv2.imshow(self.preview_window_title, render)
             cv2.waitKey(1)
             if WINDOWS_AVAILABLE:
                 set_window_always_on_top(self.preview_window_title, self.window_always_on_top)
+                if self.screen_info:
+                    try:
+                        hwnd = win32gui.FindWindow(None, self.preview_window_title)
+                        if hwnd:
+                            x = self.screen_info.get("right_half_x", 700)
+                            top_window_height = self.screen_info.get("top_half_height", height // 2)
+                            y = top_window_height - 20
+                            win32gui.SetWindowPos(hwnd, 0, x, y, display_width, display_height,
+                                                  win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
+                    except Exception as e:
+                        print(f"Could not position DAVIS preview window: {e}")
 
             last_preview = 0.0
             while self.visualization_running and not self.should_exit:
                 try:
                     evs = self.event_queue.get(timeout=0.05)
                 except queue.Empty:
-                    cv2.imshow(self.preview_window_title, last_frame)
+                    render = last_frame
+                    if (display_width, display_height) != (width, height):
+                        render = cv2.resize(last_frame, (display_width, display_height), interpolation=cv2.INTER_NEAREST)
+                    cv2.imshow(self.preview_window_title, render)
                     if cv2.waitKey(1) & 0xFF in (27, ord("q")):
                         break
                     continue
@@ -1237,13 +1264,16 @@ class EventCameraController:
                     break
                 now = time.monotonic()
                 last_frame = visualizer.generateImage(evs)
+                render = last_frame
+                if (display_width, display_height) != (width, height):
+                    render = cv2.resize(last_frame, (display_width, display_height), interpolation=cv2.INTER_NEAREST)
                 if (now - last_preview) < (1.0 / 30.0):
-                    cv2.imshow(self.preview_window_title, last_frame)
+                    cv2.imshow(self.preview_window_title, render)
                     if cv2.waitKey(1) & 0xFF in (27, ord("q")):
                         break
                     continue
                 last_preview = now
-                cv2.imshow(self.preview_window_title, last_frame)
+                cv2.imshow(self.preview_window_title, render)
                 if WINDOWS_AVAILABLE:
                     set_window_always_on_top(self.preview_window_title, self.window_always_on_top)
                 key = cv2.waitKey(1) & 0xFF
@@ -1348,6 +1378,18 @@ class DualCameraGUI:
         
         main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         main_canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_mousewheel(event):
+            if hasattr(event, "delta") and event.delta:
+                main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            elif event.num == 4:
+                main_canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                main_canvas.yview_scroll(1, "units")
+
+        main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        main_canvas.bind_all("<Button-4>", _on_mousewheel)
+        main_canvas.bind_all("<Button-5>", _on_mousewheel)
         
         main_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
