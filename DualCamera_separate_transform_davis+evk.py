@@ -17,6 +17,11 @@ import numpy as np
 
 # Output defaults
 DEFAULT_OUTPUT_DIR = "recordings"
+PREVIEW_MARGIN = 8
+PREVIEW_GAP = 10
+PREVIEW_TASKBAR_PAD = 80
+MIN_PREVIEW_WIDTH = 240
+MIN_PREVIEW_HEIGHT = 180
 
 
 def ensure_dir(path: Path) -> None:
@@ -25,6 +30,38 @@ def ensure_dir(path: Path) -> None:
 
 def sanitize_label(label: str) -> str:
     return label.lower().replace(":", "_").replace(" ", "_")
+
+
+def get_preview_geometry(screen_info, position):
+    if not screen_info:
+        return None
+    screen_width = screen_info.get("width")
+    screen_height = screen_info.get("height")
+    if not screen_width or not screen_height:
+        return None
+
+    right_x = screen_info.get("right_half_x", screen_width // 2)
+    right_w = screen_info.get("right_half_width", screen_width - right_x)
+    usable_height = screen_info.get("usable_height", screen_height - PREVIEW_TASKBAR_PAD)
+    usable_height = max(usable_height, MIN_PREVIEW_HEIGHT * 2 + PREVIEW_GAP + PREVIEW_MARGIN)
+    top_h = usable_height // 2
+
+    margin = PREVIEW_MARGIN
+    gap = PREVIEW_GAP
+    if position == "top":
+        x = right_x + margin
+        y = margin
+        w = right_w - (margin * 2)
+        h = top_h - gap - margin
+    else:
+        x = right_x + margin
+        y = top_h + gap
+        w = right_w - (margin * 2)
+        h = usable_height - top_h - gap - margin
+
+    w = max(MIN_PREVIEW_WIDTH, int(w))
+    h = max(MIN_PREVIEW_HEIGHT, int(h))
+    return int(x), int(y), int(w), int(h)
 
 # Add the camera SDK paths (modify these paths according to your setup)
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -633,15 +670,19 @@ class FrameCameraController:
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         
         # Position window on TOP HALF of right side of screen
-        if self.screen_info:
-            window_width = self.screen_info.get('right_half_width', 640)
-            window_height = self.screen_info.get('top_half_height', 360) - 50  # Leave space for title bar
-            window_x = self.screen_info.get('right_half_x', 700)
-            window_y = 0  # TOP of screen
-            
-            # Resize and position the window
+        geometry = get_preview_geometry(self.screen_info, "top")
+        if geometry:
+            window_x, window_y, window_width, window_height = geometry
             cv2.resizeWindow(window_name, window_width, window_height)
             cv2.moveWindow(window_name, window_x, window_y)
+            if WINDOWS_AVAILABLE:
+                try:
+                    hwnd = win32gui.FindWindow(None, window_name)
+                    if hwnd:
+                        win32gui.SetWindowPos(hwnd, 0, window_x, window_y, window_width, window_height,
+                                              win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
+                except Exception as e:
+                    print(f"Could not position frame preview window: {e}")
         
         # Set initial always on top state - ALWAYS SET BY DEFAULT
         if WINDOWS_AVAILABLE:
@@ -1117,32 +1158,25 @@ class EventCameraController:
                 fps=25, palette=ColorPalette.Dark
             )
 
-            if self.screen_info:
-                window_width = min(self.width, self.screen_info.get('right_half_width', self.width))
-                available_height = self.screen_info.get('height', 720) - self.screen_info.get('top_half_height', 360)
-                window_height = min(self.height, available_height - 50)
+            geometry = get_preview_geometry(self.screen_info, "bottom")
+            if geometry:
+                window_x, window_y, window_width, window_height = geometry
             else:
-                window_width = self.width
-                window_height = self.height
+                window_x, window_y = 0, 0
+                window_width, window_height = self.width, self.height
 
             with MTWindow(title=self.preview_window_title, width=window_width, height=window_height,
                          mode=BaseWindow.RenderMode.BGR) as window:
 
                 self.window = window
 
-                if WINDOWS_AVAILABLE and self.screen_info:
+                if WINDOWS_AVAILABLE and geometry:
                     def position_window():
                         time.sleep(0.3)
                         try:
                             hwnd = win32gui.FindWindow(None, self.preview_window_title)
                             if hwnd:
-                                x = self.screen_info.get('right_half_x', 700)
-                                top_window_height = self.screen_info.get('top_half_height', 360)
-                                y = top_window_height - 20
-                                width = self.screen_info.get('right_half_width', 640)
-                                remaining_height = self.screen_info.get('height', 720) - y - 50
-                                height = min(window_height, remaining_height)
-                                win32gui.SetWindowPos(hwnd, 0, x, y, width, height,
+                                win32gui.SetWindowPos(hwnd, 0, window_x, window_y, window_width, window_height,
                                                       win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
                         except Exception as e:
                             print(f"Could not position event window: {e}")
@@ -1213,11 +1247,11 @@ class EventCameraController:
             self._notify_status("DAVIS visualization started (press Q/Esc to close)")
 
             cv2.namedWindow(self.preview_window_title, cv2.WINDOW_NORMAL)
+            geometry = get_preview_geometry(self.screen_info, "bottom")
             display_width, display_height = width, height
-            if self.screen_info:
-                target_width = self.screen_info.get("right_half_width", width)
-                target_height = self.screen_info.get("height", height) - self.screen_info.get("top_half_height", height // 2) - 50
-                target_height = max(100, target_height)
+            window_x, window_y = 0, 0
+            if geometry:
+                window_x, window_y, target_width, target_height = geometry
                 scale = min(target_width / width, target_height / height)
                 if scale > 0:
                     display_width = max(100, int(width * scale))
@@ -1236,17 +1270,16 @@ class EventCameraController:
             cv2.waitKey(1)
             if WINDOWS_AVAILABLE:
                 set_window_always_on_top(self.preview_window_title, self.window_always_on_top)
-                if self.screen_info:
+                if geometry:
                     try:
                         hwnd = win32gui.FindWindow(None, self.preview_window_title)
                         if hwnd:
-                            x = self.screen_info.get("right_half_x", 700)
-                            top_window_height = self.screen_info.get("top_half_height", height // 2)
-                            y = top_window_height - 20
-                            win32gui.SetWindowPos(hwnd, 0, x, y, display_width, display_height,
+                            win32gui.SetWindowPos(hwnd, 0, window_x, window_y, display_width, display_height,
                                                   win32con.SWP_NOZORDER | win32con.SWP_NOACTIVATE)
                     except Exception as e:
                         print(f"Could not position DAVIS preview window: {e}")
+            elif geometry:
+                cv2.moveWindow(self.preview_window_title, window_x, window_y)
 
             last_preview = 0.0
             while self.visualization_running and not self.should_exit:
@@ -1322,14 +1355,14 @@ class DualCameraGUI:
         main_height = screen_height - 90  # Leave space for taskbar
         self.root.geometry(f"{main_width}x{main_height}+0+0")
         
-        # Store screen info for camera preview positioning - UPDATED calculations
+        # Store screen info for camera preview positioning
+        usable_height = max(200, screen_height - PREVIEW_TASKBAR_PAD)
         self.screen_info = {
             'width': screen_width,
             'height': screen_height,
+            'usable_height': usable_height,
             'right_half_x': screen_width // 2,
             'right_half_width': screen_width // 2,
-            'top_half_height': (screen_height - 100) // 2,  # Account for taskbar, split in half
-            'bottom_half_y': (screen_height - 100) // 2 - 20  # Position for bottom window with small gap
         }
         
         # Camera controllers with screen info
