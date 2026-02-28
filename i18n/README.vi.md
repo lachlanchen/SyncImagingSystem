@@ -1,69 +1,85 @@
 [English](../README.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Tiếng Việt](README.vi.md) · [中文 (简体)](README.zh-Hans.md) · [中文（繁體）](README.zh-Hant.md) · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
 
-# SyncImagingSystem
+[![LazyingArt banner](https://github.com/lachlanchen/lachlanchen/raw/main/figs/banner.png)](https://github.com/lachlanchen/lachlanchen/blob/main/figs/banner.png)
 
+# SyncImagingSystem
 
 ![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20focused-0078D6)
 ![Tests](https://img.shields.io/badge/Tests-Manual-F39C12)
 ![Capture](https://img.shields.io/badge/Capture-Frame%20%2B%20Event-16A085)
+![Repository](https://img.shields.io/badge/Scope-Camera%20Capture%20Workflows-6F42C1)
 ![Status](https://img.shields.io/badge/README-Enhanced-2ECC71)
 
-## Tổng quan
+`SyncImagingSystem` là workspace Python cho việc thu thập đồng bộ giữa camera frame và camera sự kiện, được tổ chức quanh các workflow thực tế cho EVK/DAVIS và Hikrobot/Haikang.
 
-`SyncImagingSystem` là một workspace Python cho thu nhận đồng bộ camera khung hình và camera sự kiện.
+## 🧭 Điều hướng nhanh
 
-Nó cung cấp ba quy trình làm việc chính đang hoạt động:
+| Mục | Liên kết |
+|---|---|
+| Quy trình làm việc chính | [Sử dụng](#usage) |
+| Thiết lập dự án | [Cài đặt](#installation) |
+| Khắc phục sự cố | [Khắc phục sự cố](#troubleshooting) |
+| Chi tiết đóng góp | [Đóng góp](#contributing) |
+| Hỗ trợ | [❤️ Support](#support) |
 
-1. `DualCamera_separate_transform_davis+evk.py`: GUI hợp nhất cho thu nhận frame + event (camera khung hình Hikrobot/Haikang + camera sự kiện EVK hoặc DAVIS).
-2. `unified_event_gui.py`: GUI chỉ sự kiện cho thiết bị EVK và DAVIS.
-3. `save_davis_tcp.py`: script thu nhận DAVIS hỗ trợ chế độ camera trực tiếp và chế độ mạng TCP của DV Viewer.
+## 📌 Tổng quan
 
-Repository cũng chứa các gói SDK/sample của nhà cung cấp và các nguyên mẫu lịch sử để tham khảo.
+`SyncImagingSystem` là workspace Python cho thu thập frame-camera và event-camera đồng bộ.
 
-## Tính năng
+Nó cung cấp ba workflow hoạt động chính:
+
+| Tập lệnh | Mục đích | Ghi chú |
+|---|---|---|
+| `DualCamera_separate_transform_davis+evk.py` | GUI hợp nhất frame + event | Hỗ trợ camera frame Hikrobot/Haikang + event camera EVK hoặc DAVIS |
+| `unified_event_gui.py` | GUI chỉ event | Thu thập EVK + DAVIS với auto-detect và ghi theo từng phiên |
+| `save_davis_tcp.py` | Script thu thập DAVIS | Hỗ trợ chế độ camera trực tiếp và chế độ mạng DV Viewer TCP |
+
+Kho lưu trữ cũng chứa các gói SDK mẫu của nhà cung cấp và các bản prototype lịch sử để tham khảo.
+
+## 🚀 Tính năng
 
 | Khu vực | Điểm nổi bật |
 |---|---|
-| 🎛️ GUI hợp nhất | GUI thu nhận frame + event hợp nhất với điều khiển theo từng thiết bị và điều khiển start/stop hợp nhất. |
-| ⚡ Event GUI | GUI chỉ sự kiện với thao tác kết nối/xem trước/ghi cho nhiều thiết bị. |
-| 📡 Nguồn DAVIS | Thu nhận DAVIS từ phần cứng trực tiếp (`INPUT_MODE = "camera"`) hoặc luồng mạng DV Viewer (`INPUT_MODE = "network"`, cổng mặc định `7777/7778`). |
-| 💾 Định dạng đầu ra | Đầu ra ghi bao gồm `.avi`, `.raw`, `.aedat4`, và `events.npz` nén tùy chọn. |
-| 🗂️ Tổ chức phiên chạy | Tự động tổ chức thư mục theo timestamp dưới `recordings/` hoặc `davis_output/`. |
-| 🔧 Điều khiển | Điều khiển bias EVK trong các quy trình GUI hợp nhất. |
-| 🪞 Biến đổi khung hình | Lật dọc, lật ngang và xoay 90 độ trong GUI dual-camera. |
-| 🖥️ Cửa sổ | Trợ giúp bố trí cửa sổ preview cho quy trình nhiều cửa sổ (đặc biệt trên Windows). |
+| 🎛️ GUI hợp nhất | GUI thu thập frame + event hợp nhất với điều khiển riêng theo từng thiết bị và nút start/stop thống nhất. |
+| ⚡ GUI Event | GUI chỉ event với thao tác connect/preview/record đa thiết bị. |
+| 📡 Nguồn DAVIS | Thu thập DAVIS từ phần cứng trực tiếp (`INPUT_MODE = "camera"`) hoặc luồng DV Viewer qua mạng (`INPUT_MODE = "network"`, cổng mặc định `7777/7778`). |
+| 💾 Định dạng đầu ra | Kết quả ghi bao gồm `.avi`, `.raw`, `.aedat4`, và `events.npz` nén tùy chọn. |
+| 🗂️ Tổ chức phiên | Tự động tạo thư mục phiên theo timestamp trong `recordings/` hoặc `davis_output/`. |
+| 🔧 Điều khiển | Điều khiển bias EVK trong các workflow GUI hợp nhất. |
+| 🪞 Biến đổi frame | Lật dọc, lật ngang và xoay 90 độ trong GUI dual-camera. |
+| 🖥️ Sắp xếp cửa sổ | Trợ giúp đặt cửa sổ preview cho workflows nhiều cửa sổ (đặc biệt trên Windows). |
 
-## Cấu trúc dự án
+## 🧩 Cấu trúc dự án
 
 ```text
 SyncImagingSystem/
 ├── README.md
 ├── AGENTS.md
-├── DualCamera_separate_transform_davis+evk.py   # GUI chính frame+event hợp nhất (EVK + DAVIS)
-├── DualCamera_separate_transform.py             # Biến thể GUI frame+EVK tích hợp cũ hơn
-├── unified_event_gui.py                         # GUI chỉ sự kiện cho EVK + DAVIS
-├── save_davis_tcp.py                            # Thu nhận DAVIS (camera hoặc DV Viewer TCP)
-├── code-legacy/                                 # Script/nguyên mẫu lịch sử
-├── evk_sdk/                                     # Script và mẫu SDK Prophesee/Metavision
-├── haikang_sdk/                                 # Gói và mẫu SDK Hikrobot/Haikang
+├── DualCamera_separate_transform_davis+evk.py   # GUI frame+event hợp nhất chính (EVK + DAVIS)
+├── DualCamera_separate_transform.py             # Phiên bản GUI frame+EVK tích hợp cũ hơn
+├── unified_event_gui.py                         # GUI chỉ event cho EVK + DAVIS
+├── save_davis_tcp.py                            # Thu thập DAVIS (camera hoặc DV Viewer TCP)
+├── code-legacy/                                 # Script/prototype lịch sử
+├── evk_sdk/                                     # SDK/phần mẫu Prophesee/Metavision
+├── haikang_sdk/                                 # Gói SDK và mẫu Hikrobot/Haikang
 ├── i18n/                                        # Thư mục bản dịch
-├── recordings/                                  # Đầu ra runtime (gitignored, tạo khi dùng)
-└── davis_output/                                # Đầu ra runtime cho save_davis_tcp.py (gitignored)
+├── recordings/                                  # Kết quả runtime (gitignored, tạo khi sử dụng)
+└── davis_output/                                # Kết quả runtime cho save_davis_tcp.py (gitignored)
 ```
 
-## Điều kiện tiên quyết
+## 🛠️ Điều kiện tiên quyết
 
 ### Phần cứng
 
-- Camera khung hình Hikrobot/Haikang (cho các quy trình frame).
-- Camera sự kiện EVK và/hoặc camera sự kiện DAVIS.
+- Camera frame Hikrobot/Haikang (cho các workflow frame).
+- Camera event EVK và/hoặc camera event DAVIS.
 
 ### Hệ điều hành
 
-- Windows là mục tiêu chính để có tích hợp đầy đủ SDK camera khung hình và hành vi bố trí preview.
-- Linux/macOS có thể chạy một phần pipeline sự kiện, nhưng không đảm bảo tương đương đầy đủ.
+- Windows là mục tiêu chính cho tích hợp đầy đủ SDK camera frame và hành vi đặt preview.
+- Linux/macOS có thể chạy một phần pipeline event, nhưng chưa đảm bảo độ tương đương đầy đủ.
 
 ### Python
 
@@ -71,62 +87,63 @@ SyncImagingSystem/
 
 ### Gói Python
 
-Cài các phụ thuộc runtime cốt lõi trong môi trường đang dùng:
+Cài các dependency runtime cốt lõi trong môi trường đang dùng:
 
 ```bash
 pip install numpy opencv-python dv-processing
 ```
 
-Với các quy trình EVK, cài các gói Python Prophesee Metavision có sẵn trong môi trường của bạn.
+Đối với EVK, cài đặt gói Python Prophesee Metavision phù hợp trong môi trường của bạn.
 
-Với hành vi điều khiển cửa sổ trên Windows trong preview GUI:
+Đối với hành vi điều khiển cửa sổ Win32 trong preview GUI:
 
 ```bash
 pip install pywin32
 ```
 
-## Cài đặt
+## 🧪 Cài đặt
 
 1. Clone repository.
-2. Mở terminal tại thư mục gốc repository:
+2. Mở terminal ở thư mục gốc:
 
 ```bash
 cd /home/lachlan/ProjectsLFS/SyncImagingSystem
 ```
 
 3. Tạo/kích hoạt môi trường Python của bạn.
-4. Cài phụ thuộc (xem ở trên).
-5. Đảm bảo runtime/driver SDK camera cần thiết đã được cài cho thiết bị của bạn.
+4. Cài dependency (xem phần trên).
+5. Đảm bảo đã cài runtime/driver SDK camera phù hợp cho thiết bị của bạn.
 
-Lưu ý giả định: ma trận phiên bản driver/firmware nhà cung cấp chính xác hiện chưa được tài liệu hóa đầy đủ trong repository; hãy giữ nguyên cấu hình SDK cục bộ đã hoạt động ổn định của bạn.
+Ghi chú giả định: ma trận phiên bản driver/firmware nhà cung cấp chưa được mô tả đầy đủ trong repo; giữ nguyên cấu hình SDK local đã kiểm chứng của bạn.
 
-## Cách sử dụng
+<a id="usage"></a>
+## ▶️ Sử dụng
 
-### 1) GUI frame + event hợp nhất (quy trình tích hợp được khuyến nghị)
+### 1) GUI frame + event hợp nhất (workflow tích hợp được khuyến nghị)
 
 ```bash
 python DualCamera_separate_transform_davis+evk.py
 ```
 
-Nội dung cung cấp:
+Những gì nó cung cấp:
 
-- Tự động quét thiết bị frame và event khi khởi động.
+- Tự động quét device frame và event khi khởi động.
 - Điều khiển camera frame: connect, grab, preview, record, exposure/gain.
 - Điều khiển camera event: connect, capture, visualize, record.
-- Điều khiển hợp nhất: start/stop preview và recording cho cả hai phía cùng lúc.
-- Điều khiển thư mục output + tiền tố tên file trong GUI.
+- Điều khiển hợp nhất: start/stop preview và ghi cho cả hai bên cùng lúc.
+- Điều khiển thư mục đầu ra + tiền tố tên file trong GUI.
 
 Hành vi đầu ra mặc định:
 
 | Đầu ra | Mẫu |
 |---|---|
 | Thư mục gốc | `recordings/` |
-| Thư mục phiên chạy | `<prefix>_<timestamp>/` |
+| Thư mục phiên | `<prefix>_<timestamp>/` |
 | File frame | `<frame_device_label>/<prefix>_frame_<timestamp>.avi` |
 | File event (EVK) | `<event_device_label>/<prefix>_<timestamp>.raw` |
-| File event (DAVIS) | `<event_device_label>/output.aedat4` (+ `events.npz` khi dừng) |
+| File event (DAVIS) | `<event_device_label>/output.aedat4` (+ `events.npz` khi stop) |
 
-### 2) GUI chỉ sự kiện
+### 2) GUI chỉ event
 
 ```bash
 python unified_event_gui.py
@@ -135,21 +152,21 @@ python unified_event_gui.py
 Hành vi mặc định:
 
 - Thư mục gốc đầu ra: `recordings/`
-- Tiền tố phiên chạy mặc định: `session`
+- Tiền tố phiên mặc định: `session`
 - Phát hiện thiết bị:
   - DAVIS từ `dv.io.camera.discover()`
-  - EVK dưới dạng `EVK:auto` khi có sẵn module Metavision
-- Đầu ra ghi:
+  - EVK dưới dạng `EVK:auto` khi module Metavision sẵn sàng
+- Kết quả ghi:
   - EVK: `.raw`
-  - DAVIS: `output.aedat4` và `events.npz` (nếu có sự kiện trong bộ đệm)
+  - DAVIS: `output.aedat4` và `events.npz` (nếu có event trong buffer)
 
-### 3) Script thu nhận DAVIS (camera hoặc DV Viewer TCP)
+### 3) Script thu thập DAVIS (camera hoặc DV Viewer TCP)
 
 ```bash
 python save_davis_tcp.py
 ```
 
-Các hằng số mặc định chính trong script:
+Các hằng số mặc định trong script:
 
 | Hằng số | Mặc định |
 |---|---|
@@ -166,38 +183,38 @@ Các hằng số mặc định chính trong script:
 Định dạng thư mục đầu ra:
 
 - `davis_output/<YYYYmmdd_HHMMSS>/`
-- File điển hình: `events.npz`, `frames.avi`, `output.aedat4`
+- Các file điển hình: `events.npz`, `frames.avi`, `output.aedat4`
 
-## Cấu hình
+## ⚙️ Cấu hình
 
 ### `save_davis_tcp.py`
 
-Điều chỉnh các hằng số viết hoa cấp cao nhất để cấu hình:
+Điều chỉnh các hằng số cấp cao kiểu viết hoa để cấu hình:
 
-- nguồn đầu vào (`INPUT_MODE`)
+- nguồn vào (`INPUT_MODE`)
 - endpoint mạng (`HOST`, `EVENTS_PORT`, `FRAMES_PORT`)
-- thời lượng thu (`CAPTURE_SECONDS`)
-- công tắc đầu ra (`SAVE_EVENTS_NPZ`, `SAVE_FRAMES_VIDEO`, `SAVE_AEDAT4`)
+- thời lượng ghi (`CAPTURE_SECONDS`)
+- cờ đầu ra (`SAVE_EVENTS_NPZ`, `SAVE_FRAMES_VIDEO`, `SAVE_AEDAT4`)
 - hành vi preview (`SHOW_EVENT_PREVIEW`, `PREVIEW_FPS`, `PREVIEW_WINDOW_NAME`)
 
 ### `DualCamera_separate_transform_davis+evk.py`
 
-Thiết lập runtime lộ ra trong GUI bao gồm:
+Các tùy chọn runtime được expose trong GUI gồm:
 
 - thư mục đầu ra và tiền tố tên file
 - biến đổi frame (lật dọc/lật ngang, xoay)
-- điều khiển exposure và gain cho frame
-- điều khiển bias EVK (`bias_diff`, `bias_diff_off`, `bias_diff_on`, `bias_fo`, `bias_hpf`, `bias_refr`) khi được hỗ trợ
+- điều khiển exposure và gain
+- điều khiển bias EVK (`bias_diff`, `bias_diff_off`, `bias_diff_on`, `bias_fo`, `bias_hpf`, `bias_refr`) khi có hỗ trợ
 
 ### `unified_event_gui.py`
 
-Mặc định chính (có thể sửa trong script):
+Các giá trị mặc định chính (có thể chỉnh trong script):
 
 - `DEFAULT_OUTPUT_DIR = "recordings"`
 - `DEFAULT_PREFIX = "session"`
 - `PREVIEW_FPS = 30.0`
 
-## Ví dụ
+## 💡 Ví dụ
 
 ### Ví dụ A: Thu trực tiếp camera DAVIS trong 10 giây
 
@@ -234,7 +251,7 @@ Chạy:
 python save_davis_tcp.py
 ```
 
-### Ví dụ C: Phiên chỉ sự kiện với cả EVK và DAVIS cùng kết nối
+### Ví dụ C: Phiên chỉ event với EVK và DAVIS cùng kết nối
 
 ```bash
 python unified_event_gui.py
@@ -242,69 +259,70 @@ python unified_event_gui.py
 
 Sau đó trong GUI:
 
-1. Nhấp `Scan`.
+1. Nhấn `Scan`.
 2. Kết nối các thiết bị đã chọn.
 3. Đặt thư mục đầu ra/tiền tố.
-4. Dùng `Record All` để bắt đầu các thư mục đầu ra theo phiên chạy được đồng bộ.
+4. Dùng `Record All` để bắt đầu xuất dữ liệu theo thư mục phiên đồng bộ.
 
-## Ghi chú phát triển
+## 🛠️ Ghi chú phát triển
 
-- Hiện chưa có hệ thống build hoặc metadata package (`pyproject.toml`, `requirements.txt`, v.v. chưa có).
-- Script được khởi chạy trực tiếp bằng Python entrypoint.
-- Cấu hình chủ yếu là hằng số trong script và điều khiển GUI, không phải cờ CLI.
-- Các thư mục SDK nhà cung cấp được giữ trong repository một cách có chủ đích:
+- Hiện chưa có build system hoặc metadata package (`pyproject.toml`, `requirements.txt`, ... không có).
+- Scripts được chạy trực tiếp bằng entrypoint Python.
+- Cấu hình chủ yếu bằng hằng số trong script và điều khiển GUI, không phải CLI flags.
+- Thư mục SDK nhà cung cấp được giữ cố ý trong repo:
   - `evk_sdk/`
   - `haikang_sdk/`
-- Các artifact đầu ra/dữ liệu được gitignore, bao gồm:
+- Kết quả đầu ra/dữ liệu được gitignore, bao gồm:
   - `recordings/`, `davis_output/`, `data/`, `*.aedat4`, `*.raw`, `*.avi`, `*.npz`, v.v.
-- GUI dual-camera bao gồm logic bố trí preview để giảm hiện tượng pop-in và tránh che các điều khiển chính, đặc biệt trên Windows.
+- GUI dual-camera có logic đặt cửa sổ preview để giảm hiện tượng pop-in và giữ window không che khuất controls chính, đặc biệt trên Windows.
 
-## Khắc phục sự cố
+<a id="troubleshooting"></a>
+## 🧭 Khắc phục sự cố
 
-| Triệu chứng | Kiểm tra / Hành động |
-|---|---|
-| Lỗi import `dv_processing` | Cài hoặc sửa `dv-processing` trong môi trường đang hoạt động. Chế độ camera DAVIS trực tiếp trong `save_davis_tcp.py` yêu cầu `dv-processing`. |
-| Lỗi import/module EVK (`metavision_*`) | Xác nhận SDK Metavision/module Python đã được cài và nằm trên Python path của bạn. |
-| Lỗi import SDK camera frame (`MvCameraControl_class`, v.v.) | Xác minh file SDK Hikrobot/Haikang và phụ thuộc runtime có sẵn. Xác nhận các đường dẫn SDK cục bộ mà script dùng là hợp lệ. |
-| Không tìm thấy thiết bị | Kiểm tra kết nối camera, nguồn điện và quyền truy cập. Chạy lại `Scan` trong GUI sau khi kết nối lại phần cứng. |
-| DAVIS preview chưa hiển thị sự kiện ngay | Cửa sổ preview có thể mở với khung hình trống cho đến khi gói sự kiện đến. |
-| Preview không luôn-on-top hoặc không đúng vị trí như mong đợi | Trên Windows, cài `pywin32`; trên nền tảng không phải Windows, hành vi bị giới hạn. |
-| File ghi thiếu nội dung kỳ vọng | Một số file chỉ hoàn tất khi dừng; hãy đảm bảo dừng recording đúng cách trước khi đóng ứng dụng. |
+- Không tìm thấy thiết bị khi khởi động.
+  - Kiểm tra cáp camera, nguồn và driver của nhà cung cấp.
+  - Xác nhận quyền truy cập thiết bị và runtime frame/event đã được cài đặt.
+- GUI bị đóng băng khi xem preview khung đầu tiên.
+  - Bắt đầu khi frame và event camera chưa cắm, sau đó nối lại và quét lại.
+- Chế độ mạng DAVIS không nhận được dữ liệu.
+  - Kiểm tra cổng stream DV Viewer khớp với `EVENTS_PORT`/`FRAMES_PORT`.
+  - Kiểm tra rules tường lửa cho loopback nội bộ và UDP/TCP theo cấu hình.
+- File `.npz` hoặc `.aedat4` event không được tạo.
+  - Kiểm tra các cờ lưu trong `save_davis_tcp.py` đã bật.
+  - Xác nhận quyền ghi tới thư mục đầu ra.
+- Vị trí cửa sổ nhảy trên Windows.
+  - Đảm bảo đã cài `pywin32` và Python có đủ quyền.
 
-## Lộ trình
+## 🗺️ Lộ trình
 
-- Thêm file phụ thuộc được ghim phiên bản (`requirements.txt` hoặc `pyproject.toml`).
-- Thêm test tự động không phụ thuộc phần cứng cho logic tiện ích.
-- Mở rộng tài liệu cho các tổ hợp phần cứng/driver/phiên bản đã được xác thực.
-- Thêm tham số CLI cho các hằng số script hiện đang hardcode.
-- Thêm các README đa ngôn ngữ trong `i18n/` và liên kết chúng từ dòng language-options.
+Các cải tiến định hướng tài liệu/UX dự kiến (chưa hoàn tất trong repo):
 
-## Đóng góp
+1. Chuẩn hóa dependencies trong file requirements pin version.
+2. Thêm CLI nhẹ cho các chế độ thu không cần GUI.
+3. Mở rộng ma trận tương thích SDK và firmware.
+4. Thêm test an toàn, không phụ thuộc phần cứng cho hằng số và logic bố cục file.
 
-Hoan nghênh đóng góp.
+<a id="contributing"></a>
+## 👥 Đóng góp
 
-Quy trình đề xuất:
+Các đóng góp đều được chào đón.
 
-1. Tạo một nhánh cho thay đổi của bạn.
-2. Giữ sửa đổi tập trung và an toàn với phần cứng.
-3. Xác thực bằng cách chạy script liên quan trên các thiết bị sẵn có.
-4. Tránh commit dữ liệu/recording sinh ra có kích thước lớn.
-5. Mở PR mô tả:
-   - môi trường phần cứng/phần mềm
-   - thiết lập camera
-   - cổng/cài đặt viewer (cho quy trình mạng)
-   - đường dẫn output/log mẫu
+1. Giữ thay đổi tập trung vào workflow-level scripts và tránh chỉnh sửa hành vi thu thập runtime nếu không phải thay đổi đường đi camera có chủ đích.
+2. Giữ nguyên lifecycle thread camera và quy ước bố cục thư mục đầu ra nếu không có lý do hợp lệ trong PR.
+3. Xác thực các thay đổi path/script bằng ít nhất một lần chạy capture cục bộ đầy đủ.
+4. Bao gồm giả định và ngữ cảnh phần cứng trong mô tả PR.
 
-Lưu ý quy ước repository: thông điệp commit hiện còn đơn giản; hãy dùng câu ngắn dạng mệnh lệnh (ví dụ: `Add DAVIS capture docs`).
+## 📩 Liên hệ
 
-## Giấy phép
+Nếu bạn cần hỗ trợ tích hợp cho một thiết lập phần cứng cụ thể, hãy ghi rõ model camera, hệ điều hành và log lỗi đầy đủ trong mô tả issue.
 
-Hiện chưa có file giấy phép rõ ràng trong repository này.
+## 📜 Giấy phép
 
-Lưu ý giả định: nếu dự án này hướng đến phân phối lại, hãy thêm file `LICENSE` và cập nhật mục này.
+Không có file license trong repository root tại thời điểm biên soạn này. Hãy thêm file `LICENSE` trước khi phân phối rộng rãi.
 
-## Lời cảm ơn
 
-- Hệ sinh thái Prophesee Metavision (`evk_sdk/` và các module Python liên quan).
-- Hệ sinh thái iniVation/dv-processing cho xử lý DAVIS.
-- Tài nguyên SDK camera Hikrobot/Haikang được đóng gói trong `haikang_sdk/`.
+## ❤️ Support
+
+| Donate | PayPal | Stripe |
+| --- | --- | --- |
+| [![Donate](https://camo.githubusercontent.com/24a4914f0b42c6f435f9e101621f1e52535b02c225764b2f6cc99416926004b7/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f446f6e6174652d4c617a79696e674172742d3045413545393f7374796c653d666f722d7468652d6261646765266c6f676f3d6b6f2d6669266c6f676f436f6c6f723d7768697465)](https://chat.lazying.art/donate) | [![PayPal](https://camo.githubusercontent.com/d0f57e8b016517a4b06961b24d0ca87d62fdba16e18bbdb6aba28e978dc0ea21/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f50617950616c2d526f6e677a686f754368656e2d3030343537433f7374796c653d666f722d7468652d6261646765266c6f676f3d70617970616c266c6f676f436f6c6f723d7768697465)](https://paypal.me/RongzhouChen) | [![Stripe](https://camo.githubusercontent.com/1152dfe04b6943afe3a8d2953676749603fb9f95e24088c92c97a01a897b4942/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f5374726970652d446f6e6174652d3633354246463f7374796c653d666f722d7468652d6261646765266c6f676f3d737472697065266c6f676f436f6c6f723d7768697465)](https://buy.stripe.com/aFadR8gIaflgfQV6T4fw400) |

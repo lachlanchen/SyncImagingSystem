@@ -1,40 +1,61 @@
 [English](../README.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Tiếng Việt](README.vi.md) · [中文 (简体)](README.zh-Hans.md) · [中文（繁體）](README.zh-Hant.md) · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
 
+[![LazyingArt banner](https://github.com/lachlanchen/lachlanchen/raw/main/figs/banner.png)](https://github.com/lachlanchen/lachlanchen/blob/main/figs/banner.png)
+
 # SyncImagingSystem
 
 ![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20focused-0078D6)
 ![Tests](https://img.shields.io/badge/Tests-Manual-F39C12)
 ![Capture](https://img.shields.io/badge/Capture-Frame%20%2B%20Event-16A085)
+![Repository](https://img.shields.io/badge/Scope-Camera%20Capture%20Workflows-6F42C1)
 ![Status](https://img.shields.io/badge/README-Enhanced-2ECC71)
 
-## 概览
+`SyncImagingSystem` 是一个面向 EVK/DAVIS 和 Hikrobot/Haikang 相机的同步帧相机与事件相机采集 Python 工作区，围绕可落地的实拍流程组织。
 
-`SyncImagingSystem` 是一个用于同步采集帧相机与事件相机数据的 Python 工作区。
+<a id="usage"></a>
+## 🧭 快速导航
 
-它提供三个主要的在用工作流：
-
-1. `DualCamera_separate_transform_davis+evk.py`：用于帧 + 事件采集的统一 GUI（Hikrobot/Haikang 帧相机 + EVK 或 DAVIS 事件相机）。
-2. `unified_event_gui.py`：面向 EVK 与 DAVIS 设备的纯事件 GUI。
-3. `save_davis_tcp.py`：DAVIS 采集脚本，支持相机直连模式与 DV Viewer TCP 网络模式。
-
-仓库中还包含厂商 SDK/示例包以及历史原型脚本供参考。
-
-## 功能特性
-
-| 区域 | 亮点 |
+| 部分 | 链接 |
 |---|---|
-| 🎛️ 统一 GUI | 统一的帧 + 事件采集 GUI，支持按设备控制与统一启动/停止控制。 |
-| ⚡ 事件 GUI | 纯事件 GUI，支持多设备连接/预览/录制操作。 |
-| 📡 DAVIS 数据源 | DAVIS 可从直连硬件采集（`INPUT_MODE = "camera"`），也可从 DV Viewer 网络流采集（`INPUT_MODE = "network"`，默认端口 `7777/7778`）。 |
-| 💾 输出格式 | 录制输出包含 `.avi`、`.raw`、`.aedat4`，以及可选压缩 `events.npz`。 |
-| 🗂️ 运行组织 | 在 `recordings/` 或 `davis_output/` 下自动按时间戳创建运行目录。 |
-| 🔧 控制项 | 在统一 GUI 工作流中提供 EVK bias 控制。 |
-| 🪞 帧变换 | 双相机 GUI 支持垂直翻转、水平翻转和 90 度旋转。 |
-| 🖥️ 窗口管理 | 为多窗口工作流提供预览窗口定位辅助（尤其在 Windows 上）。 |
+| 主要流程 | [使用说明](#usage) |
+| 项目设置 | [安装](#installation) |
+| 故障排查 | [故障排查](#troubleshooting) |
+| 参与说明 | [贡献指南](#contributing) |
+| 支持 | [❤️ Support](#-support) |
 
-## 项目结构
+<a id="overview"></a>
+## 📌 概览
+
+`SyncImagingSystem` 是一个用于同步帧相机和事件相机采集的 Python 工作区。
+
+它提供了三条主要的可用工作流：
+
+| 脚本 | 用途 | 说明 |
+|---|---|---|
+| `DualCamera_separate_transform_davis+evk.py` | 统一帧 + 事件 GUI | 支持 Hikrobot/Haikang 的帧相机与 EVK 或 DAVIS 事件相机 |
+| `unified_event_gui.py` | 事件独立 GUI | EVK + DAVIS 的自动检测与逐次运行记录 |
+| `save_davis_tcp.py` | DAVIS 采集脚本 | 支持直接相机模式和 DV Viewer TCP 网络模式 |
+
+仓库还包含供应商 SDK/示例集合，以及供参考的历史原型。
+
+<a id="features"></a>
+## 🚀 特性
+
+| 模块 | 要点 |
+|---|---|
+| 🎛️ 统一 GUI | 带每设备控制与统一开始/停止的帧 + 事件统一采集界面 |
+| ⚡ 事件 GUI | 支持多设备连接、预览与录制的事件独立界面 |
+| 📡 DAVIS 数据源 | 支持直接硬件模式（`INPUT_MODE = "camera"`）或 DV Viewer 网络流模式（`INPUT_MODE = "network"`，默认端口 `7777/7778`） |
+| 💾 输出格式 | 录制产物包括 `.avi`、`.raw`、`.aedat4`，以及可选压缩 `events.npz` |
+| 🗂️ 运行目录 | 在 `recordings/` 或 `davis_output/` 下自动按时间戳创建运行目录 |
+| 🔧 控制项 | 统一 GUI 中提供 EVK 的偏置控制 |
+| 🪞 帧图像变换 | 双相机 GUI 中支持上下翻转、左右翻转和 90 度旋转 |
+| 🖥️ 窗口 | 预览窗口布局助手，适配多窗口场景（尤其是 Windows） |
+
+<a id="project-structure"></a>
+## 🧩 项目结构
 
 ```text
 SyncImagingSystem/
@@ -47,44 +68,46 @@ SyncImagingSystem/
 ├── code-legacy/                                 # Historical scripts/prototypes
 ├── evk_sdk/                                     # Prophesee/Metavision SDK scripts and samples
 ├── haikang_sdk/                                 # Hikrobot/Haikang SDK bundles and samples
-├── i18n/                                        # Translation directory (multilingual READMEs)
+├── i18n/                                        # Translation directory
 ├── recordings/                                  # Runtime output (gitignored, created on use)
 └── davis_output/                                # Runtime output for save_davis_tcp.py (gitignored)
 ```
 
-## 先决条件
+<a id="prerequisites"></a>
+## 🛠️ 先决条件
 
 ### 硬件
 
-- Hikrobot/Haikang 帧相机（用于帧工作流）。
+- Hikrobot/Haikang 帧相机（用于帧采集流程）。
 - EVK 事件相机和/或 DAVIS 事件相机。
 
-### 操作系统
+### 系统
 
-- Windows 是完整帧相机 SDK 集成与预览窗口定位行为的主要目标平台。
-- Linux/macOS 可能可运行部分事件管线，但不保证完全一致的功能表现。
+- Windows 是完整帧相机 SDK 集成与预览窗口摆放行为的主要目标环境。
+- Linux/macOS 可运行部分事件链路，但完整功能一致性目前不能保证。
 
 ### Python
 
 - Python 3.x。
 
-### Python 包
+### Python 依赖
 
-在当前激活环境中安装核心运行时依赖：
+在当前环境中安装核心运行时依赖：
 
 ```bash
 pip install numpy opencv-python dv-processing
 ```
 
-对于 EVK 工作流，请安装环境中可用的 Prophesee Metavision Python 包。
+对于 EVK 流程，请安装环境中可用的 Prophesee Metavision Python 包。
 
-对于 GUI 预览中的 Windows 窗口控制行为：
+为 GUI 预览在 Windows 下的窗口控制行为，安装：
 
 ```bash
 pip install pywin32
 ```
 
-## 安装
+<a id="installation"></a>
+## 🧪 安装
 
 1. 克隆仓库。
 2. 在仓库根目录打开终端：
@@ -95,37 +118,38 @@ cd /home/lachlan/ProjectsLFS/SyncImagingSystem
 
 3. 创建并激活你的 Python 环境。
 4. 安装依赖（见上文）。
-5. 确认已为设备安装所需的相机 SDK 运行时/驱动。
+5. 为你的设备安装对应的相机 SDK 运行时/驱动。
 
-假设说明：仓库内尚未完整记录厂商驱动/固件的精确版本矩阵；请保留你本地已验证可用的 SDK 配置。
+说明：仓库内尚未完整记录厂商驱动和固件版本矩阵；请保留你本地已验证可用的 SDK 环境。
 
-## 使用方法
+<a id="usage"></a>
+## ▶️ 使用说明
 
-### 1) 统一帧 + 事件 GUI（推荐的一体化工作流）
+### 1) 统一帧 + 事件 GUI（推荐的集成流程）
 
 ```bash
 python DualCamera_separate_transform_davis+evk.py
 ```
 
-提供内容：
+提供能力：
 
-- 启动时自动扫描帧设备与事件设备。
-- 帧相机控制：连接、抓取、预览、录制、曝光/增益。
+- 启动时自动扫描帧相机与事件相机设备。
+- 帧相机控制：连接、抓帧、预览、录制、曝光/增益调节。
 - 事件相机控制：连接、采集、可视化、录制。
-- 统一控制：同时启动/停止两侧预览与录制。
-- GUI 中可设置输出目录与文件名前缀。
+- 统一控制：为两侧提供同步预览与录制开始/停止。
+- 在 GUI 中控制输出目录和文件名前缀。
 
 默认输出行为：
 
-| 输出 | 模式 |
+| 输出项 | 规则 |
 |---|---|
 | 基础目录 | `recordings/` |
 | 运行目录 | `<prefix>_<timestamp>/` |
 | 帧文件 | `<frame_device_label>/<prefix>_frame_<timestamp>.avi` |
 | 事件文件（EVK） | `<event_device_label>/<prefix>_<timestamp>.raw` |
-| 事件文件（DAVIS） | `<event_device_label>/output.aedat4`（停止时额外生成 `events.npz`） |
+| 事件文件（DAVIS） | `<event_device_label>/output.aedat4`（停止时可附带 `events.npz`） |
 
-### 2) 纯事件 GUI
+### 2) 事件独立 GUI
 
 ```bash
 python unified_event_gui.py
@@ -137,22 +161,22 @@ python unified_event_gui.py
 - 默认运行前缀：`session`
 - 设备发现：
   - DAVIS 来自 `dv.io.camera.discover()`
-  - 若 Metavision 模块可用，EVK 显示为 `EVK:auto`
+  - EVK 当 Metavision 模块可用时显示为 `EVK:auto`
 - 录制输出：
   - EVK：`.raw`
-  - DAVIS：`output.aedat4` 与 `events.npz`（若存在缓冲事件）
+  - DAVIS：`output.aedat4` 与 `events.npz`（若缓冲事件存在）
 
-### 3) DAVIS 采集脚本（相机直连或 DV Viewer TCP）
+### 3) DAVIS 采集脚本（相机模式或 DV Viewer TCP）
 
 ```bash
 python save_davis_tcp.py
 ```
 
-脚本中的默认关键常量：
+脚本默认关键常量：
 
 | 常量 | 默认值 |
 |---|---|
-| `INPUT_MODE` | `"camera"`（DV Viewer TCP 使用 `"network"`） |
+| `INPUT_MODE` | `"camera"`（DV Viewer TCP 为 `"network"`） |
 | `HOST` | `"127.0.0.1"` |
 | `EVENTS_PORT` | `7777` |
 | `FRAMES_PORT` | `7778` |
@@ -165,13 +189,14 @@ python save_davis_tcp.py
 输出目录格式：
 
 - `davis_output/<YYYYmmdd_HHMMSS>/`
-- 典型文件：`events.npz`、`frames.avi`、`output.aedat4`
+- 常见文件：`events.npz`、`frames.avi`、`output.aedat4`
 
-## 配置
+<a id="configuration"></a>
+## ⚙️ 配置
 
 ### `save_davis_tcp.py`
 
-可通过顶部大写常量进行配置：
+调整脚本顶部的大写常量即可配置：
 
 - 输入源（`INPUT_MODE`）
 - 网络端点（`HOST`、`EVENTS_PORT`、`FRAMES_PORT`）
@@ -181,24 +206,25 @@ python save_davis_tcp.py
 
 ### `DualCamera_separate_transform_davis+evk.py`
 
-GUI 可在运行时设置：
+GUI 暴露的运行设置包括：
 
 - 输出文件夹与文件名前缀
-- 帧变换（垂直/水平翻转、旋转）
+- 帧图像变换（上下/左右翻转、旋转）
 - 帧曝光与增益控制
-- 支持时的 EVK bias 控制（`bias_diff`、`bias_diff_off`、`bias_diff_on`、`bias_fo`、`bias_hpf`、`bias_refr`）
+- 当支持时 EVK 偏置参数（`bias_diff`、`bias_diff_off`、`bias_diff_on`、`bias_fo`、`bias_hpf`、`bias_refr`）
 
 ### `unified_event_gui.py`
 
-关键默认值（可在脚本中编辑）：
+可编辑关键默认值（在脚本内）：
 
 - `DEFAULT_OUTPUT_DIR = "recordings"`
 - `DEFAULT_PREFIX = "session"`
 - `PREVIEW_FPS = 30.0`
 
-## 示例
+<a id="examples"></a>
+## 💡 示例
 
-### 示例 A：直连 DAVIS 相机采集 10 秒
+### 示例 A：直接 DAVIS 相机采集 10 秒
 
 编辑 `save_davis_tcp.py`：
 
@@ -233,7 +259,7 @@ FRAMES_PORT = 7778
 python save_davis_tcp.py
 ```
 
-### 示例 C：同时连接 EVK 与 DAVIS 的纯事件会话
+### 示例 C：同时连接 EVK 与 DAVIS 的事件独立会话
 
 ```bash
 python unified_event_gui.py
@@ -243,67 +269,71 @@ python unified_event_gui.py
 
 1. 点击 `Scan`。
 2. 连接所选设备。
-3. 设置输出文件夹/前缀。
-4. 使用 `Record All` 启动同步的按次运行输出目录。
+3. 设置输出文件夹与前缀。
+4. 使用 `Record All` 启动每次运行的同步输出。
 
-## 开发说明
+<a id="development-notes"></a>
+## 🛠️ 开发说明
 
-- 当前尚未定义构建系统或包元数据（缺少 `pyproject.toml`、`requirements.txt` 等）。
-- 脚本通过 Python 入口直接启动。
-- 配置主要通过脚本常量和 GUI 控件完成，而非 CLI 参数。
-- 厂商 SDK 目录有意保留在仓库中：
+- 当前尚未定义构建系统或包元数据（`pyproject.toml`、`requirements.txt` 等文件缺失）。
+- 脚本采用 Python 入口直接运行。
+- 配置主要依赖脚本常量和 GUI 控件，不走 CLI 参数。
+- SDK 目录按仓库内置方式保留：
   - `evk_sdk/`
   - `haikang_sdk/`
-- 输出/数据产物已加入 gitignore，包括：
+- 输出和数据制品已纳入 gitignore，包括：
   - `recordings/`、`davis_output/`、`data/`、`*.aedat4`、`*.raw`、`*.avi`、`*.npz` 等。
-- 双相机 GUI 包含预览窗口定位逻辑，目的是减少预览窗口弹出抖动，并避免遮挡主控件，尤其在 Windows 上。
+- 双相机 GUI 内置了预览窗口摆放逻辑，旨在减少预览窗口弹跳，并避免在 Windows 上遮挡主控界面。
 
-## 故障排查
+<a id="troubleshooting"></a>
+## 🧭 故障排查
 
-| 症状 | 检查 / 处理 |
-|---|---|
-| `dv_processing` 导入错误 | 在当前环境中安装或修复 `dv-processing`。`save_davis_tcp.py` 的 DAVIS 相机直连模式依赖 `dv-processing`。 |
-| EVK 导入/模块错误（`metavision_*`） | 确认 Metavision SDK/Python 模块已安装，并位于 Python 路径中。 |
-| 帧相机 SDK 导入失败（`MvCameraControl_class` 等） | 检查 Hikrobot/Haikang SDK 文件与运行时依赖是否齐全。确认脚本使用的本地 SDK 路径有效。 |
-| 未发现设备 | 检查相机连接、电源与权限。硬件重连后在 GUI 中再次执行 `Scan`。 |
-| DAVIS 预览未立即显示事件 | 在事件包到达前，预览窗口可能会先显示空白帧。 |
-| 预览窗口未保持置顶或位置不符合预期 | 在 Windows 上安装 `pywin32`；在非 Windows 平台上该行为能力有限。 |
-| 录制文件缺少预期内容 | 部分文件在停止时才会最终写入；关闭应用前请先正常停止录制。 |
+- 启动时未检测到设备。
+  - 检查相机线缆、供电与厂商驱动。
+  - 确认设备权限，并且事件/帧处理运行时已安装。
+- 首次帧预览时 GUI 卡死。
+  - 先断开帧相机与事件相机后启动，再重新连接并重新扫描。
+- DAVIS 网络模式无数据。
+  - 确认 DV Viewer 的流端口与 `EVENTS_PORT`/`FRAMES_PORT` 一致。
+  - 检查本地回环及 UDP/TCP 流量的防火墙规则。
+- `.npz` 或 `.aedat4` 未生成。
+  - 确认 `save_davis_tcp.py` 中的保存开关已启用。
+  - 确认输出目录具有写权限。
+- Windows 下窗口位置抖动。
+  - 确认已安装 `pywin32`，并且 Python 具备必要权限。
 
-## 路线图
+<a id="roadmap"></a>
+## 🗺️ 路线图
 
-- 增加固定依赖文件（`requirements.txt` 或 `pyproject.toml`）。
-- 为通用工具逻辑增加硬件无关的自动化测试。
-- 扩展经过验证的硬件/驱动/版本组合文档。
-- 为当前硬编码的脚本常量增加 CLI 参数。
-- 在 `i18n/` 中补充多语言 README，并在语言选项行中链接。
+计划中的文档和可用性改进（仓库内暂未完全完成）：
 
-## 贡献
+1. 将依赖集中到固定版本的 requirements 文件。
+2. 为非 GUI 采集模式增加轻量级 CLI 替代方案。
+3. 扩展 SDK 与固件兼容性矩阵。
+4. 增加与硬件解耦、稳定的常量与文件布局逻辑测试。
 
-欢迎贡献。
+<a id="contributing"></a>
+## 👥 贡献
 
-建议工作流：
+欢迎参与贡献。
 
-1. 为你的修改创建分支。
-2. 保持修改聚焦且对硬件安全。
-3. 使用可用设备运行相关脚本进行验证。
-4. 避免提交体积较大的录制数据/生成数据。
-5. 提交 PR 时说明：
-   - 硬件/软件环境
-   - 相机配置
-   - 端口/查看器设置（网络工作流）
-   - 示例输出路径/日志
+1. 将变更限定在脚本级流程，不要随意修改运行时采集行为，除非你确有意改变某条相机路径。
+2. 除非 PR 中说明充分理由，保留现有相机线程生命周期和输出目录布局约定。
+3. 至少使用一次完整的本地采集运行验证变更的路径/脚本。
+4. 在 PR 描述中补充假设和硬件上下文信息。
 
-仓库约定说明：当前提交信息风格较轻量；建议使用简短祈使句（例如：`Add DAVIS capture docs`）。
+## 📩 联系我们
 
-## 许可证
+如果你需要特定硬件组合的集成帮助，请在 issue 描述中提供你的相机型号、操作系统以及完整错误输出。
 
-该仓库当前没有明确的许可证文件。
+<a id="license"></a>
+## 📜 许可
 
-假设说明：如果项目计划用于再分发，请添加 `LICENSE` 文件并更新本节。
+仓库当前版本在根目录没有许可证文件。请在公开分发前补充 `LICENSE` 文件。
 
-## 致谢
 
-- Prophesee Metavision 生态（`evk_sdk/` 及相关 Python 模块）。
-- 用于 DAVIS 处理的 iniVation/dv-processing 生态。
-- `haikang_sdk/` 下打包的 Hikrobot/Haikang 相机 SDK 资源。
+## ❤️ Support
+
+| Donate | PayPal | Stripe |
+| --- | --- | --- |
+| [![Donate](https://camo.githubusercontent.com/24a4914f0b42c6f435f9e101621f1e52535b02c225764b2f6cc99416926004b7/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f446f6e6174652d4c617a79696e674172742d3045413545393f7374796c653d666f722d7468652d6261646765266c6f676f3d6b6f2d6669266c6f676f436f6c6f723d7768697465)](https://chat.lazying.art/donate) | [![PayPal](https://camo.githubusercontent.com/d0f57e8b016517a4b06961b24d0ca87d62fdba16e18bbdb6aba28e978dc0ea21/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f50617950616c2d526f6e677a686f754368656e2d3030343537433f7374796c653d666f722d7468652d6261646765266c6f676f3d70617970616c266c6f676f436f6c6f723d7768697465)](https://paypal.me/RongzhouChen) | [![Stripe](https://camo.githubusercontent.com/1152dfe04b6943afe3a8d2953676749603fb9f95e24088c92c97a01a897b4942/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f5374726970652d446f6e6174652d3633354246463f7374796c653d666f722d7468652d6261646765266c6f676f3d737472697065266c6f676f436f6c6f723d7768697465)](https://buy.stripe.com/aFadR8gIaflgfQV6T4fw400) |

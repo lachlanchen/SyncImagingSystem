@@ -1,41 +1,57 @@
 [English](../README.md) · [العربية](README.ar.md) · [Español](README.es.md) · [Français](README.fr.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Tiếng Việt](README.vi.md) · [中文 (简体)](README.zh-Hans.md) · [中文（繁體）](README.zh-Hant.md) · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
 
-# SyncImagingSystem
+[![LazyingArt banner](https://github.com/lachlanchen/lachlanchen/raw/main/figs/banner.png)](https://github.com/lachlanchen/lachlanchen/blob/main/figs/banner.png)
 
+# SyncImagingSystem
 
 ![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20focused-0078D6)
 ![Tests](https://img.shields.io/badge/Tests-Manual-F39C12)
 ![Capture](https://img.shields.io/badge/Capture-Frame%20%2B%20Event-16A085)
+![Repository](https://img.shields.io/badge/Scope-Camera%20Capture%20Workflows-6F42C1)
 ![Status](https://img.shields.io/badge/README-Enhanced-2ECC71)
 
-## Überblick
+`SyncImagingSystem` ist ein Python-Arbeitsbereich für synchronisierte Aufnahmeprozesse von Frame-Kameras und Event-Kameras, organisiert um praxisnahe Workflows für EVK/DAVIS und Hikrobot/Haikang Kameras.
 
-`SyncImagingSystem` ist ein Python-Workspace für synchronisierte Frame-Kamera- und Event-Kamera-Aufnahme.
+## 🧭 Schnellnavigator
 
-Es bietet drei aktive Haupt-Workflows:
+| Bereich | Link |
+|---|---|
+| Haupt-Workflows | [Nutzung](#nutzung) |
+| Projekt-Setup | [Installation](#installation) |
+| Fehlerbehebung | [Fehlerbehebung](#fehlerbehebung) |
+| Beitrag leisten | [Mitwirken](#mitwirken) |
+| Support | [❤️ Support](#-support) |
 
-1. `DualCamera_separate_transform_davis+evk.py`: einheitliche GUI für Frame- + Event-Aufnahme (Hikrobot/Haikang-Frame-Kamera + EVK- oder DAVIS-Event-Kamera).
-2. `unified_event_gui.py`: reine Event-GUI für EVK- und DAVIS-Geräte.
-3. `save_davis_tcp.py`: DAVIS-Aufnahmeskript mit direktem Kameramodus und DV-Viewer-TCP-Netzwerkmodus.
+## 📌 Ueberblick
 
-Das Repository enthält außerdem Vendor-SDK-/Sample-Bundles und historische Prototypen als Referenz.
+`SyncImagingSystem` ist ein Python-Arbeitsbereich für synchronisierte Aufnahmeprozesse von Frame-Kameras und Event-Kameras.
 
-## Funktionen
+Es bietet drei zentrale, aktive Workflows:
+
+| Skript | Zweck | Hinweise |
+|---|---|---|
+| `DualCamera_separate_transform_davis+evk.py` | Vereinheitlichte GUI für Frame + Event | Unterstützt Hikrobot/Haikang Frame-Kamera plus EVK- oder DAVIS-Event-Kamera |
+| `unified_event_gui.py` | Reine Event-GUI | EVK + DAVIS Capture mit Auto-Erkennung und Aufzeichnung pro Lauf |
+| `save_davis_tcp.py` | DAVIS-Capture-Skript | Unterstützt direkten Kameramodus und DV Viewer Netzwerk-TCP-Modus |
+
+Das Repository enthält außerdem SDK-/Sample-Bundles der Hersteller und frühere Prototypen als Referenz.
+
+## 🚀 Features
 
 | Bereich | Highlights |
 |---|---|
-| 🎛️ Einheitliche GUI | Einheitliche Frame- + Event-Aufnahme-GUI mit gerätespezifischen Bedienelementen und gemeinsamen Start/Stopp-Steuerungen. |
-| ⚡ Event-GUI | Reine Event-GUI mit Connect/Preview/Record für mehrere Geräte. |
-| 📡 DAVIS-Quellen | DAVIS-Aufnahme von direkter Hardware (`INPUT_MODE = "camera"`) oder DV-Viewer-Netzwerkstream (`INPUT_MODE = "network"`, Standardports `7777/7778`). |
+| 🎛️ Vereinheitlichte GUI | Vereinte Frame- + Event-GUI mit gerätespezifischen Bedienelementen und gemeinsamem Start-/Stoppen. |
+| ⚡ Event GUI | Event-only-GUI mit Mehrgeräte-Anschluss, Vorschau und Aufnahmefunktionen. |
+| 📡 DAVIS-Quellen | DAVIS-Aufnahme über direkte Hardware (`INPUT_MODE = "camera"`) oder DV Viewer Netzwerkstream (`INPUT_MODE = "network"`, Standardports `7777/7778`). |
 | 💾 Ausgabeformate | Aufnahmeausgaben umfassen `.avi`, `.raw`, `.aedat4` und optional komprimiertes `events.npz`. |
-| 🗂️ Lauf-Organisation | Automatische, zeitgestempelte Run-Ordner unter `recordings/` oder `davis_output/`. |
-| 🔧 Steuerung | EVK-Bias-Steuerungen in den einheitlichen GUI-Workflows. |
-| 🪞 Frame-Transformation | Vertikales Flippen, horizontales Flippen und 90-Grad-Rotation in der Dual-Kamera-GUI. |
-| 🖥️ Fensterverwaltung | Hilfslogik zur Positionierung von Vorschaufenstern für Multi-Window-Workflows (insbesondere unter Windows). |
+| 🗂️ Lauf-Organisation | Automatische, zeitgestempelte Laufordner unter `recordings/` oder `davis_output/`. |
+| 🔧 Steuerung | EVK-Bias-Steuerung in den vereinten GUI-Workflows. |
+| 🪞 Frame-Transformation | Vertikales Spiegeln, horizontales Spiegeln und 90-Grad-Drehung in der Dual-Kamera-GUI. |
+| 🖥️ Fenster-Management | Hilfslogik für Preview-Fensterplatzierung in Multi-Window-Workflows (insbesondere unter Windows). |
 
-## Projektstruktur
+## 🧩 Projektstruktur
 
 ```text
 SyncImagingSystem/
@@ -46,24 +62,24 @@ SyncImagingSystem/
 ├── unified_event_gui.py                         # Reine Event-GUI für EVK + DAVIS
 ├── save_davis_tcp.py                            # DAVIS-Aufnahme (Kamera oder DV Viewer TCP)
 ├── code-legacy/                                 # Historische Skripte/Prototypen
-├── evk_sdk/                                     # Prophesee/Metavision-SDK-Skripte und Samples
-├── haikang_sdk/                                 # Hikrobot/Haikang-SDK-Bundles und Samples
+├── evk_sdk/                                     # Prophesee/Metavision SDK-Skripte und Beispiele
+├── haikang_sdk/                                 # Hikrobot/Haikang SDK-Bundles und Beispiele
 ├── i18n/                                        # Übersetzungsverzeichnis
-├── recordings/                                  # Laufzeitausgabe (gitignored, wird bei Nutzung erstellt)
-└── davis_output/                                # Laufzeitausgabe für save_davis_tcp.py (gitignored)
+├── recordings/                                  # Laufzeit-Ausgabe (gitignored, bei Nutzung erstellt)
+└── davis_output/                                # Laufzeit-Ausgabe für save_davis_tcp.py (gitignored)
 ```
 
-## Voraussetzungen
+## 🛠️ Voraussetzungen
 
 ### Hardware
 
-- Hikrobot/Haikang-Frame-Kamera (für Frame-Workflows).
+- Hikrobot/Haikang Frame-Kamera (für Frame-Workflows).
 - EVK-Event-Kamera und/oder DAVIS-Event-Kamera.
 
 ### Betriebssystem
 
-- Windows ist das primäre Ziel für vollständige Frame-Kamera-SDK-Integration und Vorschaufenster-Positionierung.
-- Linux/macOS können Teile der Event-Pipeline ausführen, aber vollständige Funktionsparität ist nicht garantiert.
+- Windows ist der Primärzielbereich für vollständige SDK-Integration von Frame-Kameras sowie für das Vorschaufenster-Positionierungsverhalten.
+- Linux/macOS können Teile der Event-Pipeline ausführen, aber vollständige Gleichwertigkeit ist nicht garantiert.
 
 ### Python
 
@@ -71,62 +87,62 @@ SyncImagingSystem/
 
 ### Python-Pakete
 
-Installiere die Kern-Laufzeitabhängigkeiten in deiner aktiven Umgebung:
+Installieren Sie die zentralen Laufzeitabhängigkeiten in Ihrer aktiven Umgebung:
 
 ```bash
 pip install numpy opencv-python dv-processing
 ```
 
-Für EVK-Workflows installiere die in deiner Umgebung verfügbaren Prophesee-Metavision-Python-Pakete.
+Für EVK-Workflows installieren Sie die Prophesee Metavision Python-Pakete, die in Ihrer Umgebung verfügbar sind.
 
-Für Windows-Fenstersteuerung in GUI-Vorschauen:
+Für das Windows-Fenstersteuerungsverhalten in GUI-Vorschauen:
 
 ```bash
 pip install pywin32
 ```
 
-## Installation
+## 🧪 Installation
 
-1. Repository klonen.
-2. Ein Terminal im Repository-Root öffnen:
+1. Klonen Sie das Repository.
+2. Öffnen Sie ein Terminal im Wurzelverzeichnis:
 
 ```bash
 cd /home/lachlan/ProjectsLFS/SyncImagingSystem
 ```
 
-3. Python-Umgebung erstellen/aktivieren.
-4. Abhängigkeiten installieren (siehe oben).
-5. Sicherstellen, dass die benötigten Kamera-SDK-Laufzeiten/Treiber für deine Geräte installiert sind.
+3. Erstellen/aktivieren Sie Ihre Python-Umgebung.
+4. Installieren Sie die Abhängigkeiten (siehe oben).
+5. Stellen Sie sicher, dass die benötigten Kamera-SDK-Runtimes/Treiber für Ihre Geräte installiert sind.
 
-Hinweis zur Annahme: Die exakte Vendor-Treiber-/Firmware-Versionsmatrix ist im Repository noch nicht vollständig dokumentiert; behalte dein lokal funktionierendes SDK-Setup bei.
+Annahme-Hinweis: Die genaue Treiber-/Firmware-Matrix der Anbieter ist im Repository noch nicht vollständig dokumentiert; behalten Sie Ihr lokal funktionierendes SDK-Setup bei.
 
-## Nutzung
+## ▶️ Nutzung
 
-### 1) Einheitliche Frame- + Event-GUI (empfohlener integrierter Workflow)
+### 1) Vereinte Frame + Event GUI (empfohlener integrierter Workflow)
 
 ```bash
 python DualCamera_separate_transform_davis+evk.py
 ```
 
-Bereitgestellte Funktionen:
+Das bietet:
 
 - Auto-Scan für Frame- und Event-Geräte beim Start.
-- Frame-Kamera-Steuerung: verbinden, grabben, Vorschau, Aufnahme, Belichtung/Gain.
-- Event-Kamera-Steuerung: verbinden, erfassen, visualisieren, aufnehmen.
-- Gemeinsame Steuerung: Vorschau und Aufnahme für beide Seiten zusammen starten/stoppen.
-- Steuerung von Ausgabeverzeichnis + Dateinamenpräfix in der GUI.
+- Frame-Kamerasteuerung: Verbinden, Aufnehmen, Vorschau, Aufzeichnen, Belichtung/Verstärkung.
+- Event-Kamerasteuerung: Verbinden, Erfassen, Visualisieren, Aufzeichnen.
+- Vereinte Steuerung: Vorschau und Aufzeichnung für beide Seiten gemeinsam starten/stoppen.
+- Ausgabeordner- und Dateipräfix-Steuerung in der GUI.
 
 Standard-Ausgabeverhalten:
 
 | Ausgabe | Muster |
 |---|---|
 | Basisverzeichnis | `recordings/` |
-| Run-Ordner | `<prefix>_<timestamp>/` |
+| Laufordner | `<prefix>_<timestamp>/` |
 | Frame-Dateien | `<frame_device_label>/<prefix>_frame_<timestamp>.avi` |
 | Event-Dateien (EVK) | `<event_device_label>/<prefix>_<timestamp>.raw` |
 | Event-Dateien (DAVIS) | `<event_device_label>/output.aedat4` (+ `events.npz` beim Stoppen) |
 
-### 2) Reine Event-GUI
+### 2) Event-only GUI
 
 ```bash
 python unified_event_gui.py
@@ -134,22 +150,22 @@ python unified_event_gui.py
 
 Standardverhalten:
 
-- Basis-Ausgabeverzeichnis: `recordings/`
-- Standard-Run-Präfix: `session`
+- Basisausgabeverzeichnis: `recordings/`
+- Standard-Laufpräfix: `session`
 - Geräteerkennung:
-  - DAVIS über `dv.io.camera.discover()`
+  - DAVIS via `dv.io.camera.discover()`
   - EVK als `EVK:auto`, wenn Metavision-Module verfügbar sind
-- Aufnahmeausgaben:
+- Aufnahme-Ausgaben:
   - EVK: `.raw`
-  - DAVIS: `output.aedat4` und `events.npz` (wenn gepufferte Events vorhanden sind)
+  - DAVIS: `output.aedat4` und `events.npz` (falls gepufferte Events vorhanden sind)
 
-### 3) DAVIS-Aufnahmeskript (Kamera oder DV Viewer TCP)
+### 3) DAVIS-Capture-Skript (Kamera oder DV Viewer TCP)
 
 ```bash
 python save_davis_tcp.py
 ```
 
-Wichtige Standardkonstanten im Skript:
+Standardkonstanten im Skript:
 
 | Konstante | Standard |
 |---|---|
@@ -163,45 +179,45 @@ Wichtige Standardkonstanten im Skript:
 | `SAVE_AEDAT4` | `True` |
 | `SHOW_EVENT_PREVIEW` | `True` |
 
-Format des Ausgabeverzeichnisses:
+Ausgabeverzeichnisformat:
 
 - `davis_output/<YYYYmmdd_HHMMSS>/`
 - Typische Dateien: `events.npz`, `frames.avi`, `output.aedat4`
 
-## Konfiguration
+## ⚙️ Konfiguration
 
 ### `save_davis_tcp.py`
 
-Passe die obersten Konstanten in Großbuchstaben an, um Folgendes zu konfigurieren:
+Passen Sie die oberen Konstanten in Großbuchstaben an, um Folgendes zu konfigurieren:
 
 - Eingabequelle (`INPUT_MODE`)
 - Netzwerk-Endpunkt (`HOST`, `EVENTS_PORT`, `FRAMES_PORT`)
 - Aufnahmedauer (`CAPTURE_SECONDS`)
-- Ausgabetoggles (`SAVE_EVENTS_NPZ`, `SAVE_FRAMES_VIDEO`, `SAVE_AEDAT4`)
+- Ausgabe-Schalter (`SAVE_EVENTS_NPZ`, `SAVE_FRAMES_VIDEO`, `SAVE_AEDAT4`)
 - Vorschauverhalten (`SHOW_EVENT_PREVIEW`, `PREVIEW_FPS`, `PREVIEW_WINDOW_NAME`)
 
 ### `DualCamera_separate_transform_davis+evk.py`
 
-Zur Laufzeit in der GUI verfügbare Einstellungen:
+Laufzeit-Einstellungen in der GUI beinhalten:
 
-- Ausgabeordner und Dateinamenpräfix
-- Frame-Transformationen (vertikal/horizontal flippen, Rotation)
+- Ausgabeordner und Dateiname-Präfix
+- Frame-Transformationen (Vertikalspiegelung, Horizontalspiegelung, Rotation)
 - Frame-Belichtungs- und Gain-Regler
-- EVK-Bias-Steuerung (`bias_diff`, `bias_diff_off`, `bias_diff_on`, `bias_fo`, `bias_hpf`, `bias_refr`) falls unterstützt
+- EVK-Bias-Steuerungen (`bias_diff`, `bias_diff_off`, `bias_diff_on`, `bias_fo`, `bias_hpf`, `bias_refr`) falls unterstützt
 
 ### `unified_event_gui.py`
 
-Wichtige Standardwerte (im Skript editierbar):
+Wichtige Standards (änderbar im Skript):
 
 - `DEFAULT_OUTPUT_DIR = "recordings"`
 - `DEFAULT_PREFIX = "session"`
 - `PREVIEW_FPS = 30.0`
 
-## Beispiele
+## 💡 Beispiele
 
 ### Beispiel A: Direkte DAVIS-Kameraaufnahme für 10 Sekunden
 
-`save_davis_tcp.py` bearbeiten:
+Bearbeiten Sie `save_davis_tcp.py`:
 
 ```python
 INPUT_MODE = "camera"
@@ -217,9 +233,9 @@ Ausführen:
 python save_davis_tcp.py
 ```
 
-### Beispiel B: DAVIS-Daten über TCP aus DV Viewer empfangen
+### Beispiel B: DAVIS-Daten über DV Viewer via TCP empfangen
 
-`save_davis_tcp.py` bearbeiten:
+Bearbeiten Sie `save_davis_tcp.py`:
 
 ```python
 INPUT_MODE = "network"
@@ -234,7 +250,7 @@ Ausführen:
 python save_davis_tcp.py
 ```
 
-### Beispiel C: Reine Event-Session mit verbundenem EVK und DAVIS
+### Beispiel C: Event-only-Sitzung mit verbundenem EVK und DAVIS
 
 ```bash
 python unified_event_gui.py
@@ -244,67 +260,66 @@ Dann in der GUI:
 
 1. Auf `Scan` klicken.
 2. Ausgewählte Geräte verbinden.
-3. Ausgabeordner/Präfix setzen.
-4. Mit `Record All` synchronisierte Ausgabeordner pro Run starten.
+3. Ausgabeordner/Vorlage setzen.
+4. `Record All` nutzen, um synchronisierte Ausgabeordner pro Lauf zu starten.
 
-## Entwicklungshinweise
+## 🛠️ Entwicklungshinweise
 
-- Aktuell ist kein Build-System oder Paket-Metadaten definiert (`pyproject.toml`, `requirements.txt` usw. fehlen).
+- Es ist kein Build-System oder Paket-Metadaten definiert (`pyproject.toml`, `requirements.txt`, etc. fehlen aktuell).
 - Skripte werden direkt über Python-Entrypoints gestartet.
-- Die Konfiguration erfolgt überwiegend über Skriptkonstanten und GUI-Steuerungen, nicht über CLI-Flags.
-- Vendor-SDK-Verzeichnisse bleiben absichtlich im Repository:
+- Die Konfiguration basiert überwiegend auf Skriptkonstanten und GUI-Steuerelementen, nicht auf CLI-Flags.
+- SDK-Verzeichnisse der Anbieter sind absichtlich im Repository enthalten:
   - `evk_sdk/`
   - `haikang_sdk/`
-- Ausgabe-/Datenartefakte sind in `.gitignore` enthalten, einschließlich:
-  - `recordings/`, `davis_output/`, `data/`, `*.aedat4`, `*.raw`, `*.avi`, `*.npz` usw.
-- Die Dual-Kamera-GUI enthält Vorschaufenster-Positionierungslogik, um Pop-in zu reduzieren und zu verhindern, dass Fenster die Hauptsteuerungen verdecken, besonders unter Windows.
+- Ausgabe-/Datenartefakte sind in .gitignore enthalten, einschließlich:
+  - `recordings/`, `davis_output/`, `data/`, `*.aedat4`, `*.raw`, `*.avi`, `*.npz`, etc.
+- Die Dual-Kamera-GUI enthält Vorschauplatzierungslogik, um Fenster-Pop-in zu reduzieren und zu vermeiden, dass Vorschaufenster die Hauptsteuerung verdecken, besonders unter Windows.
 
-## Fehlerbehebung
+## 🧭 Fehlerbehebung
 
-| Symptom | Prüfungen / Maßnahmen |
-|---|---|
-| `dv_processing`-Importfehler | `dv-processing` in der aktiven Umgebung installieren oder reparieren. Der direkte DAVIS-Kameramodus in `save_davis_tcp.py` benötigt `dv-processing`. |
-| EVK-Import-/Modulfehler (`metavision_*`) | Prüfen, ob Metavision-SDK/Python-Module installiert und im Python-Pfad verfügbar sind. |
-| Importfehler beim Frame-Kamera-SDK (`MvCameraControl_class` usw.) | Verifizieren, dass Hikrobot/Haikang-SDK-Dateien und Laufzeitabhängigkeiten vorhanden sind. Prüfen, ob lokal verwendete SDK-Pfade in den Skripten gültig sind. |
-| Keine Geräte gefunden | Kamera-Verbindung, Stromversorgung und Berechtigungen prüfen. GUI-`Scan` nach erneutem Verbinden der Hardware erneut ausführen. |
-| DAVIS-Vorschau zeigt nicht sofort Events | Ein Vorschaufenster kann mit leerem Frame öffnen, bis Event-Pakete eintreffen. |
-| Vorschau ist nicht immer im Vordergrund oder nicht wie erwartet positioniert | Unter Windows `pywin32` installieren; auf Nicht-Windows-Plattformen ist das Verhalten eingeschränkt. |
-| Aufnahmedateien enthalten nicht den erwarteten Inhalt | Manche Dateien werden erst beim Stoppen finalisiert; sicherstellen, dass die Aufnahme sauber beendet wird, bevor die App geschlossen wird. |
+- Keine Geräte beim Start gefunden.
+  - Prüfen Sie Kamerakabel, Stromversorgung und Treiber.
+  - Bestätigen Sie Geräteberechtigungen und dass Frame-/Event-Runtimes installiert sind.
+- Misch-GUI hängt beim ersten Vorschauframe.
+  - Starten Sie mit getrennten Frame- und Event-Geräten, verbinden Sie erneut und scannen Sie danach erneut.
+- DAVIS Netzwerkmodus empfängt keine Daten.
+  - Prüfen Sie, ob DV Viewer Stream-Ports zu `EVENTS_PORT`/`FRAMES_PORT` passen.
+  - Überprüfen Sie Firewall-Regeln für Loopback und UDP/TCP-Traffic im lokalen Modus.
+- `.npz` oder `.aedat4` Event-Dateien werden nicht erzeugt.
+  - Prüfen Sie, ob die Speicher-Schalter in `save_davis_tcp.py` aktiviert sind.
+  - Bestätigen Sie Schreibrechte im Ausgabeverzeichnis.
+- Fensterposition springt auf Windows.
+  - Stellen Sie sicher, dass `pywin32` installiert ist und Python die erforderlichen Berechtigungen hat.
 
-## Roadmap
+## 🗺️ Roadmap
 
-- Gepinnte Abhängigkeitsdateien hinzufügen (`requirements.txt` oder `pyproject.toml`).
-- Hardware-unabhängige, automatisierte Tests für Utility-Logik hinzufügen.
-- Dokumentation für validierte Hardware-/Treiber-/Versionskombinationen erweitern.
-- CLI-Argumente für aktuell hartkodierte Skriptkonstanten hinzufügen.
-- Mehrsprachige README-Dateien in `i18n/` ergänzen und über die Sprachoptionenzeile verlinken.
+Geplante, dokumentations- und nutzerorientierte Verbesserungen (im Repository noch nicht vollständig umgesetzt):
 
-## Mitwirken
+1. Abhängigkeiten in einer festen Anforderungsdatei zentral zusammenfassen.
+2. Schlanke CLI-Alternativen für nicht-GUI-Capture-Modi ergänzen.
+3. SDK- und Firmware-Kompatibilitätsmatrix erweitern.
+4. Sichere, hardwareunabhängige Tests für Projektkonstanten und Dateilayout-Logik ergänzen.
+
+## 👥 Mitwirken
 
 Beiträge sind willkommen.
 
-Empfohlener Ablauf:
+1. Beschränken Sie Änderungen auf Script-Workflows und vermeiden Sie die Änderung des Laufzeitverhaltens der Aufnahme, außer wenn ein Kamerapfad absichtlich angepasst wird.
+2. Bewahren Sie den bestehenden Kamerathread-Lebenszyklus und das Output-Ordnerlayout, sofern keine klare Begründung in der Änderung besteht.
+3. Validieren Sie geänderte Pfade/Skripte mit mindestens einem vollständigen lokalen Aufnahme-Lauf.
+4. Fügen Sie Annahmen und den Hardware-Kontext in die PR-Beschreibung ein.
 
-1. Einen Branch für deine Änderung erstellen.
-2. Änderungen fokussiert und hardware-sicher halten.
-3. Durch Ausführen relevanter Skripte gegen verfügbare Geräte validieren.
-4. Große generierte Aufnahmen/Daten nicht committen.
-5. PR mit folgenden Angaben öffnen:
-   - Hardware-/Software-Umgebung
-   - Kamera-Setup
-   - Port-/Viewer-Einstellungen (für Netzwerk-Workflows)
-   - Beispiel-Ausgabepfade/-Logs
+## 📩 Kontakt
 
-Hinweis zur Repository-Konvention: Commit-Nachrichten sind derzeit leichtgewichtig; kurze Imperativ-Nachrichten verwenden (zum Beispiel: `Add DAVIS capture docs`).
+Wenn Sie Integrationshilfe für ein bestimmtes Hardware-Setup benötigen, geben Sie bitte Kamera-Modell, Betriebssystem und die genaue Fehlerausgabe in Ihrer Issue-Beschreibung an.
 
-## Lizenz
+## 📜 Lizenz
 
-Derzeit ist in diesem Repository keine explizite Lizenzdatei vorhanden.
+Zur Zeit ist im Repository-Root keine Lizenzdatei vorhanden. Fügen Sie eine `LICENSE`-Datei hinzu, bevor Sie öffentlich verteilen.
 
-Hinweis zur Annahme: Wenn dieses Projekt zur Weiterverteilung gedacht ist, füge eine `LICENSE`-Datei hinzu und aktualisiere diesen Abschnitt.
 
-## Danksagungen
+## ❤️ Support
 
-- Prophesee-Metavision-Ökosystem (`evk_sdk/` und zugehörige Python-Module).
-- iniVation/dv-processing-Ökosystem für DAVIS-Handling.
-- Hikrobot/Haikang-Kamera-SDK-Ressourcen im Verzeichnis `haikang_sdk/`.
+| Donate | PayPal | Stripe |
+| --- | --- | --- |
+| [![Donate](https://camo.githubusercontent.com/24a4914f0b42c6f435f9e101621f1e52535b02c225764b2f6cc99416926004b7/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f446f6e6174652d4c617a79696e674172742d3045413545393f7374796c653d666f722d7468652d6261646765266c6f676f3d6b6f2d6669266c6f676f436f6c6f723d7768697465)](https://chat.lazying.art/donate) | [![PayPal](https://camo.githubusercontent.com/d0f57e8b016517a4b06961b24d0ca87d62fdba16e18bbdb6aba28e978dc0ea21/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f50617950616c2d526f6e677a686f754368656e2d3030343537433f7374796c653d666f722d7468652d6261646765266c6f676f3d70617970616c266c6f676f436f6c6f723d7768697465)](https://paypal.me/RongzhouChen) | [![Stripe](https://camo.githubusercontent.com/1152dfe04b6943afe3a8d2953676749603fb9f95e24088c92c97a01a897b4942/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f5374726970652d446f6e6174652d3633354246463f7374796c653d666f722d7468652d6261646765266c6f676f3d737472697065266c6f676f436f6c6f723d7768697465)](https://buy.stripe.com/aFadR8gIaflgfQV6T4fw400) |
